@@ -74,7 +74,7 @@ BambooSaplingBlock.randomTick	port	crates/horizon-world/src/level/tick.rs::Sim::
 BambooSaplingBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	
 BarrelBlock.createBlockStateDefinition	skip:data		block state definition is data (blocks table in horizon-items)
 BarrelBlock.rotate	port	crates/horizon-world/src/worldgen/structure.rs::StateTransforms::rotate	
-BarrelBlock.tick	port	crates/horizon-client/src/game/block_entity_anims.rs::Game::barrel_openers_changed	gap: minor: recheckOpen is the open-viewer count, checked where the lid state is set
+BarrelBlock.tick	port	crates/horizon-world/src/level/tick.rs::Sim::tick_block	the scheduled recheck; the open or close a menu sees is crates/horizon-client/src/game/block_entity_anims.rs::Game::barrel_openers_changed
 BarrelBlock.useWithoutItem	port	crates/horizon-world/src/level/interact.rs::Sim::use_without_item	
 BarrierBlock.canPlaceLiquid	port	crates/horizon-world/src/level/fluids.rs::Sim::can_place_liquid	
 BarrierBlock.getFluidState	port	crates/horizon-world/src/registry_fluid.rs::RegistryFluidWorld::fluid_state	

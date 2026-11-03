@@ -399,5 +399,10 @@
   "horizon.extras.hide_block_particles.tooltip": "Masque les débris qui jaillissent d'un bloc cassé et s'effritent de celui que vous minez. Les autres particules restent.",
   "horizon.extras.splitscreen.tooltip": "Dans un monde, une autre manette peut rejoindre en tant que nouveau joueur : appuyez sur A quand c'est demandé, puis choisissez un profil et où jouer.",
   "horizon.extras.ui_sound_reserve": "Canaux pour sons UI",
-  "horizon.extras.ui_sound_reserve.tooltip": "Les sons du monde laissent 16 des 247 canaux sonores libres, pour qu'un déluge de sons (une grosse explosion) ne couvre pas les clics de menu."
+  "horizon.extras.ui_sound_reserve.tooltip": "Les sons du monde laissent 16 des 247 canaux sonores libres, pour qu'un déluge de sons (une grosse explosion) ne couvre pas les clics de menu.",
+  "horizon.extras.header.cosmetics": "Cosmétiques",
+  "horizon.extras.cosmetics_mine": "Mes cosmétiques",
+  "horizon.extras.cosmetics_mine.tooltip": "Affiche les cosmétiques que vous portez sur votre joueur, à la troisième personne et dans l'inventaire.",
+  "horizon.extras.cosmetics_others": "Cosmétiques des autres",
+  "horizon.extras.cosmetics_others.tooltip": "Affiche les cosmétiques que portent les autres joueurs Horizon. Désactivé, le jeu ne demande jamais ce qu'ils portent."
 }

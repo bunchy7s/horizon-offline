@@ -366,7 +366,8 @@ impl Game<'_> {
                     let m = &self.mobs[j];
                     let animal = is_animal(m.species());
                     // Another player's too, on a server's client.
-                    let offset = riders::vehicle_attachment(m);
+                    // AbstractBoat's box is 1.375 wide.
+                    let offset = riders::vehicle_attachment(m, 1.375);
                     let index = players + n;
                     // calculatePassengerBodyYRot.
                     let turn = match (animal && full, m.id.is_multiple_of(2)) {

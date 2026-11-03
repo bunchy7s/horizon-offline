@@ -494,6 +494,44 @@ position), `block_entity` (the broken block's entity as it was before the break,
 vanilla's `time_check` and `weather_check`). The game sets it for a block a player or an explosion breaks and for a
 mob's death loot; on other rolls `place` is `None`.
 
+### Recipe book category declarations (first slice of #5501)
+
+The pending `recipe_book_categories` API fragment adds a declaration hook and a
+lookup helper. It has no API number until stamping; do not require a guessed
+hooks version. Trait mods import `RecipeBookCategory` from `horizon_client::mod_api`
+and append declarations in `Hooks::recipe_book_categories`:
+
+```rust,ignore
+event.categories.push(RecipeBookCategory {
+    id: "mymod:crushing".into(),
+    recipe_type: "mymod:crusher".into(),
+    icon: "mymod:crusher".into(),
+});
+```
+
+Mixin bundles use `native_recipe_book_categories(categories)` at the same hook
+point. `host.recipe_book_category("mymod:crusher")` (the mixin helper is
+`native_recipe_book_category`) returns the validated declaration, including its
+icon, or `None`. It does not grant recipes. Declarations are requested lazily at
+first lookup, cached for that recipe table, and invalidated on a new session,
+server recipe-content replacement or server `/reload`. No lookup means no hook
+call or per-frame work. A client validates against its own custom recipes unless
+`native_datapack_sync` has supplied the server's type (API 120).
+
+Every field must be a fully namespaced resource id. Category ids and recipe types
+must be outside `minecraft:`; the type must occur in the current custom recipe
+table. The icon must name a registered, non-air item. Invalid ids, unknown types,
+missing/unknown icons, and duplicate category ids or recipe types are logged and
+skipped, never panicked on. The first valid declaration wins each id and type;
+an invalid declaration does not reserve either. This slice supports one category
+per type, not per-recipe category selectors.
+
+**Not yet book UI support:** custom recipes still have no book displays or
+unlock/display-id synchronization. This slice deliberately leaves vanilla tabs,
+search, layouts and unlock behavior unchanged. Adding custom tabs, displaying and
+searching recipes there, and unlocking them like vanilla remain follow-up work
+for #5501; a declaration alone will not make a recipe visible.
+
 ### A mod's own ingredient kinds
 
 A recipe's ingredient that names a type in a namespace outside `minecraft:` reaches
@@ -846,6 +884,57 @@ player killed while leashed drops on its next tick, naming the killer. Bundles t
 `"hooks": 102`.
 
 API 103 adds native mod particle types to `native_send_particles`: `ParticleOptions::named("mymod:spark")` sends a particle of the mod's own type, drawn by Horizon clients from the sprite set in the mod's `assets/<namespace>/particles/<path>.json` (`"textures": ["mymod:spark/1", ...]`, resolved as `particle/<texture>` in the atlas). The name must be namespaced; a client without that file draws nothing for it, vanilla clients (whose brand isn't Horizon's) aren't sent it, and the call still returns true. The type behaves as vanilla's `SimpleParticleType` with a sprite set: a plain billboard, no tint, 20 to 40 ticks, its motion the game's default spread (the speed sets its direction, not how fast it goes). Bundles that use it need `"hooks": 103`.
+
+A mod particle may opt into declarative behaviour in that same particle JSON (no new hook API):
+
+```json
+{
+  "textures": ["mymod:spark"],
+  "horizon:behaviour": {
+    "velocity": [0.0, 0.15, 0.0],
+    "velocity_jitter": [0.02, 0.0, 0.02],
+    "animation": "loop",
+    "frame_ticks": 3,
+    "gravity": 0.5,
+    "friction": 0.96,
+    "lifetime": 40,
+    "size": [0.1, 0.0],
+    "alpha": [1.0, 0.0]
+  }
+}
+```
+
+`animation` chooses how the particle walks through its sprites: `age` (first to last over its
+lifetime), `loop` (cycles every `frame_ticks` ticks, 1..200, only valid with `loop`), `random` (one random
+sprite, kept) or `first` (the first sprite, kept). Without `animation` the particle keeps the sprite it was
+spawned with, as before.
+
+Every field is optional. Omit `horizon:behaviour` (or use `{}`) to keep the existing behaviour,
+including its random draws, unchanged. `velocity` replaces the initial randomized velocity with
+an exact vector in blocks/tick, plus the velocity the spawn call passed; omit it to retain the spawn's default spread. `velocity_jitter` adds a random
+offset per axis, uniform in `-j..=j` (0..16 each, drawn from the particle's seeded generator, so the same
+seed gives the same particle); declaring it alone starts from zero plus the spawn velocity. Each component must
+be finite and within -16..16. `gravity` is the vanilla multiplier: each tick subtracts
+`0.04 * gravity` from vertical velocity before moving (negative rises; range -100..100).
+After movement, `friction` multiplies all velocity components (0..1); normal block collisions
+and the vanilla on-ground horizontal multiplier of 0.7 still apply. Omitted gravity remains 0,
+omitted friction remains the engine default (0.98), and omitted lifetime remains 20..39 ticks.
+`lifetime` is an integer from 1 to 12000; removal uses the existing base tick: it moves that many
+times and is removed on the following tick.
+
+`size` and `alpha` are `[start, end]` linear curves over `age / lifetime`, clamped to their
+endpoints. Size is billboard half-width/half-height in blocks (0..16), not a multiplier;
+alpha is opacity (0..1). The start value applies immediately at spawn, then the curves update
+once per tick, reaching the end after `lifetime` motion ticks. Omitted size keeps the random
+spawn size; omitted alpha stays 1. Fading particles use the blended particle layer.
+Malformed declarations, unknown behaviour fields, non-finite or out-of-range numbers reject the
+whole behaviour object with a log warning, falling back to the existing particle behaviour;
+the sprite set still loads. Vanilla particle JSONs are unaffected. Resource reloads apply new
+declarations to newly spawned particles; live particles keep their spawn-time values.
+The engine copies fixed-size numeric data at spawn and performs no new allocations per particle
+tick. This first slice supports only linear size/opacity curves and constant gravity/friction;
+there is no per-particle code hook.
+
 
 API 104 adds the open screen hears of a key press (`native_screen_key_pressed_pre`) and of each character it types (`native_screen_char_typed_pre`), as vanilla's `ScreenEvent.KeyPressed.Pre` and `.CharacterTyped.Pre`: the screen, vanilla's key name (`key.keyboard.e`, as `native_key` hands it over; a key with no name fires nothing), whether the press is an auto-repeat, the character, GLFW's modifier bits (shift 1, control 2, alt 4, super 8), and `screen.mouse` for the pointer. A cancelled press goes no further — no focus move, no Escape-close, no inventory or hotbar key, no typing by the key itself, no `native_key` — while its release still arrives, so a `native_key` listener sees that release without its press, and the characters no mod cancelled still reach the text box, as vanilla's separate `charTyped` comes for a cancelled `keyPressed` too. A cancelled character drops only that character and never reaches a text box; control characters (Enter, Backspace, Tab, Delete, Escape, a Control letter) are keys and fire nothing. A key's characters fire after the key has acted, as GLFW's char callback comes after its key callback, so a key that closes the screen (the inventory key) reports no character (the closed screen hears none) and one that moves the focus types into the box it moved to. The input method's committed text fires the character hook too. They fire for the window and the control socket's `key` and `type` (not its `\b` backspace), after the fullscreen, screenshot, debug and narrator keys, never on the title screen itself (Options and the pack list opened from it do fire), the connect and loading screens, the prompts, books and sign editors drawn over gameplay, or while a world loads or saves. Bundles need "hooks": 104.
 
@@ -2332,6 +2421,9 @@ a dimension.
 
 - `entity.position(host)`, `block_position`, `rotation` (yaw and pitch), `kind` (`minecraft:zombie`), `uuid` (`&mut`:
   an entity with no UUID yet gets its own) and `level` read the entity.
+- `entity.velocity(host)` (a player's is the move its client last reported), `set_velocity(host, v)` (not for players,
+  whose client moves them), `on_ground`, `bounding_box` (lowest and highest corner), `eye_height`, `eye_position`,
+  `view_vector` and `distance_to_sqr(host, pos)` read and move it.
 - An `EntityRef` holds the world's open (`NativeWorldEpoch`) and the entity's id, which no other entity of that open
   gets. A handle of an earlier open, of an entity that is gone or moved to another level (it gets a new id there, as in
   vanilla), or used on a client reads as `None`.
@@ -2937,10 +3029,14 @@ Ok::<(), AttachmentError>(())
 For mixin code, see [The typed API from mixin code](#the-typed-api-from-mixin-code).
 
 Use `Holder::Level`, `Holder::Chunk([x, z])`, `Holder::BlockEntity([x, y, z])`,
-`Holder::Entity(id)`, or `Holder::Player(uuid)`. Entity IDs cover mobs, item
-entities, boats, minecarts, armor stands, cushions, item frames, paintings and the
-server's `OtherEntity` records; projectiles, orbs and other ID-less save paths are
-not covered. Player UUIDs cover online guests and the acting player. Mutable level
+`Holder::Entity(id)`, or `Holder::Player(uuid)`. Entity IDs cover every entity in
+the level apart from players: mobs, items, experience orbs, projectiles, tridents,
+falling blocks, primed TNT, fireworks, boats, minecarts, armor stands, cushions, item
+frames, paintings, End crystals, the ender dragon, ominous item spawners and the
+server's `OtherEntity` records. An entity keeps its UUID through saves, so its saved
+attachments load back with it; an orb saved with a `count` above one loads as several
+orbs, and only the first keeps the attachments. Player UUIDs cover online guests and
+the acting player. Mutable level
 hosts can access their level, loaded chunks and block entities; read-only level hosts
 cannot access attachments. Unserialized values disappear on unload or restart. A saved
 value is stored under `horizon:attachments`, then the mod namespace and attachment name,

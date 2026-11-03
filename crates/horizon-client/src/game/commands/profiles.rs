@@ -1,8 +1,9 @@
-//! `/op`, `/deop`, `/ban`, `/pardon`, `/ban-ip`, `/pardon-ip`, `/banlist` and
-//! `/whitelist` (OpCommand, DeOpCommands, BanPlayerCommands, PardonCommand,
-//! BanIpCommands, PardonIpCommand, BanListCommands, WhitelistCommand):
-//! commands of a dedicated server, run on its lists by an operator in game
-//! (the console has its own handlers in game/dedicated.rs).
+//! `/op`, `/deop`, `/ban`, `/pardon`, `/ban-ip`, `/pardon-ip`, `/banlist`,
+//! `/transfer` and `/whitelist` (OpCommand, DeOpCommands, BanPlayerCommands,
+//! PardonCommand, BanIpCommands, PardonIpCommand, BanListCommands,
+//! TransferCommand, WhitelistCommand): commands of a dedicated server, run on
+//! its lists by an operator in game (the console has its own handlers in
+//! game/dedicated.rs).
 use super::{Arg, Context, Game, R, Target, err};
 use horizon_client::{
     server::user_lists::{BanEntry, NameAndId, OpEntry, WhiteEntry},
@@ -270,6 +271,62 @@ impl Game<'_> {
         for (uuid, _) in &players {
             self.kick_uuid(*uuid, translatable("multiplayer.disconnect.ip_banned", &[]));
         }
+        Ok(players.len() as i32)
+    }
+
+    /// `TransferCommand.register` and `TransferCommand.transfer`: each target's
+    /// client is handed to `hostname:port` (`ClientboundTransferPacket`), and
+    /// the source is told who went — the player's name for one, the count for
+    /// several. Without a players argument the source's own player is the
+    /// target, as `getPlayerOrException` asks.
+    pub(super) fn cmd_transfer(&mut self, ctx: &Context) -> R<i32> {
+        let Some(Arg::Str(hostname)) = ctx.get("hostname").cloned() else {
+            return Ok(0);
+        };
+        // `IntegerArgumentType.getInteger(c, "port")`, else 25565.
+        let port = match ctx.get("port") {
+            Some(Arg::Int(port)) => *port,
+            _ => 25565,
+        };
+        let targets = if ctx.get("players").is_some() {
+            self.entities(ctx, "players", true)?
+        } else if self.lan_acting.is_none() {
+            // CommandSourceStack.getPlayerOrException: a console or a command
+            // block has no player to send.
+            return Err(err("permissions.requires.player", &[]));
+        } else {
+            vec![Target::Player]
+        };
+        let players: Vec<(u32, String)> = targets
+            .iter()
+            .filter_map(|target| {
+                let conn = match *target {
+                    Target::Player => self.lan_acting?,
+                    Target::Guest(conn) => conn,
+                    _ => return None,
+                };
+                Some((conn, self.command_guest(conn)?.name.clone()))
+            })
+            .collect();
+        if players.is_empty() {
+            return Err(err("commands.transfer.error.no_players", &[]));
+        }
+        if let Some(host) = self.lan.as_mut() {
+            for (conn, _) in &players {
+                host.hub.transfer(*conn, &hostname, port);
+            }
+        }
+        // CommandResponseTracker.messages: one player by display name, several
+        // by count, both with the hostname and the port.
+        let lit = |s: &str| Text::literal(s.to_owned());
+        let (key, first) = match players.len() {
+            1 => ("commands.transfer.success.single", lit(&players[0].1)),
+            n => ("commands.transfer.success.multiple", lit(&n.to_string())),
+        };
+        self.feedback(Text::translate(
+            key,
+            &[first, lit(&hostname), lit(&port.to_string())],
+        ));
         Ok(players.len() as i32)
     }
 

@@ -388,6 +388,12 @@ pub mod input {
     pub const PICKUP_ALL: i32 = 6;
 }
 
+/// `AbstractContainerMenu.isContainerClickButton`: a pickup and a quick move
+/// are clicks with the left or the right button only.
+fn is_container_click_button(button: i32) -> bool {
+    button == 0 || button == 1
+}
+
 /// Apply one click; returns the stacks thrown out and the slots changed.
 pub fn click(
     view: &mut View,
@@ -404,6 +410,10 @@ pub fn click(
     } else {
         *drag = None;
         match mode {
+            // isContainerClickButton: PICKUP and QUICK_MOVE take buttons 0
+            // and 1; any other button is no click at all, so neither the
+            // slot nor the cursor moves (a modified client sends those).
+            input::PICKUP | input::QUICK_MOVE if !is_container_click_button(button) => {}
             input::PICKUP | input::QUICK_MOVE if slot == -999 => {
                 if mode == input::PICKUP
                     && let Some(mut carried) = view.guest.carried.take()
@@ -447,19 +457,22 @@ pub fn click(
                     && view.enabled(i)
                     && let Some(mut stack) = view.get(i)
                 {
-                    if button == 1 || stack.count <= 1 {
+                    // doClick's THROW takes one item for button 0 and the
+                    // whole stack for any other button.
+                    let amount = if button == 0 { 1 } else { stack.count };
+                    if amount >= stack.count {
                         drops.push(stack);
                         view.set(i, None);
                     } else {
                         let mut one = stack.clone();
-                        one.count = 1;
-                        stack.count -= 1;
+                        one.count = amount;
+                        stack.count -= amount;
                         view.set(i, Some(stack));
                         drops.push(one);
                     }
                 }
             }
-            input::PICKUP_ALL => pickup_all(view, slot, rules),
+            input::PICKUP_ALL => pickup_all(view, slot, button, rules),
             _ => {}
         }
     }
@@ -659,15 +672,21 @@ fn swap(view: &mut View, slot: i32, button: i32, rules: &dyn Rules) {
     view.set(other, a);
 }
 
-fn pickup_all(view: &mut View, slot: i32, rules: &dyn Rules) {
+fn pickup_all(view: &mut View, slot: i32, button: i32, rules: &dyn Rules) {
     let _ = slot;
     let Some(mut carried) = view.guest.carried.clone() else {
         return;
     };
     let max = rules.max_stack(&carried.item).max(1);
+    // Button 0 walks the slots from the first, button 1 from the last.
+    let order: Vec<usize> = if button == 0 {
+        (0..view.len()).collect()
+    } else {
+        (0..view.len()).rev().collect()
+    };
     // Partial stacks first, then full ones.
     for full in [false, true] {
-        for i in 0..view.len() {
+        for &i in &order {
             if carried.count >= max {
                 break;
             }
@@ -699,7 +718,20 @@ fn quick_craft(
 ) {
     let (stage, kind) = (button & 3, ((button >> 2) & 3) as u8);
     match stage {
-        0 => *drag = view.guest.carried.is_some().then_some((kind, Vec::new())),
+        0 => {
+            // `getQuickcraftType` and `isValidQuickcraftType`: a charitable
+            // (0) or greedy (1) drag is anyone's, a clone drag (2) needs
+            // infinite materials, and 3 is no type at all. A start that is
+            // not legal, or that arrives while a drag is open, leaves the
+            // fields reset instead of collecting slots.
+            let usable = match kind {
+                0 | 1 => true,
+                2 => view.guest.creative(),
+                _ => false,
+            };
+            *drag = (usable && drag.is_none() && view.guest.carried.is_some())
+                .then_some((kind, Vec::new()));
+        }
         1 => {
             if let (Some((_, slots)), Ok(i)) = (drag.as_mut(), usize::try_from(slot))
                 && i < view.len()
@@ -828,6 +860,43 @@ mod tests {
                 .map(|s| (s.item.to_string(), s.count))
                 .collect()
         })
+    }
+
+    /// A double-click's collect walks the slots in the direction the button
+    /// picks: `doClick`'s PICKUP_ALL arm starts at slot 0 with a step of +1 for
+    /// button 0, and at the last slot with -1 for button 1, which is the
+    /// button the screen sends for a double-click (`mouseReleased`).
+    #[test]
+    fn pickup_all_walks_from_the_buttons_side() {
+        let rules = SwapRules;
+        let mut g = guest();
+        let mut chest = vec![None; 5];
+        chest[0] = Some(ItemStack::new("minecraft:stone", 5));
+        chest[1] = Some(ItemStack::new("minecraft:stone", 5));
+        let mut drag = None;
+        let mut view = View {
+            guest: &mut g,
+            container: Some(&mut chest),
+            shulker: false,
+            hidden: &[],
+        };
+        // `doClick` only starts the collect when the carried stack is not
+        // empty and the clicked slot has no item or may not be taken
+        // (`!carried.isEmpty() && (!slot.hasItem() || !slot.mayPickup(player))`),
+        // so the click lands on an empty slot and the sweep picks the side.
+        // One stone short of a full stack: the right double-click takes it
+        // from the last matching slot.
+        view.guest.carried = Some(ItemStack::new("minecraft:stone", 63));
+        click(&mut view, &mut drag, 2, 1, input::PICKUP_ALL, &rules);
+        assert_eq!(view.get(0).map(|s| s.count), Some(5));
+        assert_eq!(view.get(1).map(|s| s.count), Some(4));
+        assert_eq!(view.guest.carried.as_ref().map(|s| s.count), Some(64));
+        // The left one takes it from the first.
+        view.guest.carried = Some(ItemStack::new("minecraft:stone", 63));
+        click(&mut view, &mut drag, 2, 0, input::PICKUP_ALL, &rules);
+        assert_eq!(view.get(0).map(|s| s.count), Some(4));
+        assert_eq!(view.get(1).map(|s| s.count), Some(4));
+        assert_eq!(view.guest.carried.as_ref().map(|s| s.count), Some(64));
     }
 
     /// A guest's chest clicks run `BundleItem`'s overrides: a carried
@@ -971,6 +1040,104 @@ mod tests {
         // Nothing leaves a hidden slot either.
         click(&mut view, &mut drag, 2, 0, input::QUICK_MOVE, &rules);
         assert_eq!(view.get(2).map(|s| s.item), Some("minecraft:stone".into()));
+    }
+
+    /// `AbstractContainerMenu.isValidQuickcraftType`: quick-craft type 2 (a
+    /// clone drag) is for players with infinite materials only, and type 3 is
+    /// no type at all. A survival guest that sends either moves nothing; a
+    /// creative guest's clone drag fills the slots and keeps its stack.
+    #[test]
+    fn a_clone_drag_needs_infinite_materials() {
+        let rules = SwapRules;
+        let mut g = guest();
+        let mut chest = vec![None; 3];
+        let mut drag = None;
+        let mut view = View {
+            guest: &mut g,
+            container: Some(&mut chest),
+            shulker: false,
+            hidden: &[],
+        };
+        view.guest.carried = Some(ItemStack::new("minecraft:stone", 64));
+        // Start, two slots, end, for the two types a survival guest may not
+        // use: 3 is no type, 2 is a clone drag.
+        for kind in [3, 2] {
+            click(
+                &mut view,
+                &mut drag,
+                0,
+                kind << 2,
+                input::QUICK_CRAFT,
+                &rules,
+            );
+            click(
+                &mut view,
+                &mut drag,
+                0,
+                kind << 2 | 1,
+                input::QUICK_CRAFT,
+                &rules,
+            );
+            click(
+                &mut view,
+                &mut drag,
+                1,
+                kind << 2 | 1,
+                input::QUICK_CRAFT,
+                &rules,
+            );
+            click(
+                &mut view,
+                &mut drag,
+                -999,
+                kind << 2 | 2,
+                input::QUICK_CRAFT,
+                &rules,
+            );
+            assert_eq!(view.get(0), None, "type {kind}");
+            assert_eq!(view.get(1), None, "type {kind}");
+            assert_eq!(view.guest.carried.as_ref().map(|s| s.count), Some(64));
+        }
+        // A charitable drag over the same two slots still shares the stack.
+        click(&mut view, &mut drag, 0, 0, input::QUICK_CRAFT, &rules);
+        click(&mut view, &mut drag, 0, 1, input::QUICK_CRAFT, &rules);
+        click(&mut view, &mut drag, 1, 1, input::QUICK_CRAFT, &rules);
+        click(&mut view, &mut drag, -999, 2, input::QUICK_CRAFT, &rules);
+        assert_eq!(view.get(0).map(|s| s.count), Some(32));
+        assert_eq!(view.get(1).map(|s| s.count), Some(32));
+        assert_eq!(view.guest.carried, None);
+        // With infinite materials a clone drag goes through: both slots take
+        // the whole stack and the cursor keeps it.
+        view.guest.game_mode = crate::lan::guest::CREATIVE;
+        view.guest.carried = Some(ItemStack::new("minecraft:stone", 64));
+        click(&mut view, &mut drag, 0, 2 << 2, input::QUICK_CRAFT, &rules);
+        click(
+            &mut view,
+            &mut drag,
+            0,
+            2 << 2 | 1,
+            input::QUICK_CRAFT,
+            &rules,
+        );
+        click(
+            &mut view,
+            &mut drag,
+            2,
+            2 << 2 | 1,
+            input::QUICK_CRAFT,
+            &rules,
+        );
+        click(
+            &mut view,
+            &mut drag,
+            -999,
+            2 << 2 | 2,
+            input::QUICK_CRAFT,
+            &rules,
+        );
+        assert_eq!(view.get(0).map(|s| s.count), Some(64));
+        assert_eq!(view.get(2).map(|s| s.count), Some(64));
+        assert_eq!(view.guest.carried.as_ref().map(|s| s.count), Some(64));
     }
 
     struct SwapRules;
@@ -1122,5 +1289,47 @@ mod tests {
             view.get(45).as_ref().map(|s| &*s.item),
             Some("minecraft:shield")
         );
+    }
+
+    /// `AbstractContainerMenu.isContainerClickButton`: a pickup and a quick
+    /// move exist for buttons 0 and 1 only, so a modified client's other
+    /// buttons take nothing out of a slot, move nothing to the hotbar and
+    /// drop nothing from the cursor. The other modes are not buttons' business.
+    #[test]
+    fn guest_clicks_with_a_button_other_than_0_or_1_move_nothing() {
+        let rules = ItemRules(Items::for_tests(Default::default()));
+        let mut g = guest();
+        let mut drag = None;
+        let mut view = View {
+            guest: &mut g,
+            container: None,
+            shulker: false,
+            hidden: &[],
+        };
+        // Menu slot 9 stands for inventory index 9, 36 for the hotbar's first.
+        view.guest.inventory[9] = Some(ItemStack::new("minecraft:diamond", 3));
+        click(&mut view, &mut drag, 9, 2, input::PICKUP, &rules);
+        assert_eq!(view.guest.carried, None);
+        assert_eq!(view.get(9).map(|s| s.count), Some(3));
+        click(&mut view, &mut drag, 9, 2, input::QUICK_MOVE, &rules);
+        assert_eq!(view.get(9).map(|s| s.count), Some(3));
+        assert!(view.get(36).is_none());
+        // A click outside the window drops nothing either.
+        view.guest.carried = Some(ItemStack::new("minecraft:dirt", 5));
+        let (drops, changed) = click(&mut view, &mut drag, -999, 2, input::PICKUP, &rules);
+        assert!(drops.is_empty() && changed.is_empty());
+        assert_eq!(view.guest.carried.as_ref().map(|s| s.count), Some(5));
+        // Button 1 still takes half of the stack.
+        view.guest.carried = None;
+        click(&mut view, &mut drag, 9, 1, input::PICKUP, &rules);
+        assert_eq!(view.guest.carried.as_ref().map(|s| s.count), Some(2));
+        assert_eq!(view.get(9).map(|s| s.count), Some(1));
+        // THROW reads its button as "one or the whole stack", not as a
+        // primary or secondary action.
+        view.guest.carried = None;
+        view.guest.inventory[9] = Some(ItemStack::new("minecraft:diamond", 4));
+        let (drops, _) = click(&mut view, &mut drag, 9, 2, input::THROW, &rules);
+        assert_eq!(drops.iter().fold(0, |n, s| n + s.count), 4);
+        assert!(view.get(9).is_none());
     }
 }

@@ -57,6 +57,8 @@ pub(super) trait Entity: EntityRules {
     fn id(&self) -> u32;
     fn position(&self) -> Vec3;
     fn position_mut(&mut self) -> &mut Vec3;
+    /// `Entity.getDeltaMovement`.
+    fn velocity(&self) -> Vec3;
     fn velocity_mut(&mut self) -> &mut Vec3;
     fn bounds(&self) -> Aabb;
     /// What a selector finds this entity as (`@e`), or `None` for one it cannot
@@ -249,6 +251,9 @@ macro_rules! stored_motion {
         }
         fn position_mut(&mut self) -> &mut Vec3 {
             &mut self.position
+        }
+        fn velocity(&self) -> Vec3 {
+            self.velocity
         }
         fn velocity_mut(&mut self) -> &mut Vec3 {
             &mut self.velocity
@@ -453,6 +458,18 @@ macro_rules! save_entities_of_every_kind {
 }
 
 impl Game<'_> {
+    /// The ids of the entities that are not on the walk of `entity_lists!`.
+    pub(super) fn entity_ids_off_walk(&self) -> impl Iterator<Item = u32> + '_ {
+        self.cushions
+            .iter()
+            .map(|e| e.id)
+            .chain(self.item_frames.iter().map(|e| e.id))
+            .chain(self.paintings.iter().map(|e| e.id))
+            .chain(self.others.iter().map(|e| e.id))
+            .chain(self.crystals.iter().map(|e| e.id))
+            .chain(self.dragon.iter().map(|e| e.id))
+            .chain(self.ominous_spawners.iter().map(|e| e.id))
+    }
     /// Saves every entity of every kind that lies in `keys` into `out`, by chunk.
     pub(super) fn save_every_entity(
         &mut self,

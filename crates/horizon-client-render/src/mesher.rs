@@ -871,7 +871,7 @@ impl MeshTables {
             Some(own) => lighting::packed_coords(own, packed),
             None => u32::from(packed & 15) << 4 | u32::from(packed >> 4) << 20,
         };
-        lighting::with_emission(coords, quad.light_emission)
+        lighting::with_min(coords, quad.light)
     }
     /// `BlockState.getOffset` for blocks with a random model offset.
     pub fn offset(&self, state: BlockStateId, x: i32, z: i32) -> Option<[f64; 3]> {
@@ -1584,7 +1584,12 @@ impl Mesher<'_> {
         let q = &face.quad;
         // A quad's own light (a model's glowing part) may raise the tier; whether it
         // shines all over stays the block's.
-        let tier = (state.tier & !WHOLE).max(hdr_tier("", q.light_emission)) | state.tier & WHOLE;
+        let tier = (state.tier & !WHOLE).max(hdr_tier("", q.light[0])) | state.tier & WHOLE;
+        // A quad's `neoforge_data` ambient occlusion replaces the model's; glowing blocks stay flat.
+        let ao = match q.ambient_occlusion {
+            Some(on) => on && self.smooth_lighting && state.emission == 0,
+            None => ao,
+        };
         let shade_face = q.shade_direction_override.unwrap_or(q.facing);
         let directional = if self.shader_pack_lighting {
             1.0
@@ -1610,6 +1615,14 @@ impl Mesher<'_> {
             ([lighting::gray(directional); 4], [coords; 4], [1.0f32; 4])
         };
         let tint = Self::tint(state, q.tint_index, tints, pos);
+        let tint = match q.color {
+            Some(c) => {
+                let t = tint.unwrap_or(0xFF_FFFF);
+                let channel = |s: u32| (t >> s & 255) * (c as u32 >> s & 255) / 255;
+                Some(channel(16) << 16 | channel(8) << 8 | channel(0))
+            }
+            None => tint,
+        };
         // Fusion's and then OptiFine's connected textures: another sprite, or one per quarter,
         // and the overlays drawn over it (a few per face at most; more are dropped).
         let (fusion, connected) = (&self.render.fusion, &self.render.connected);
@@ -1683,7 +1696,7 @@ impl Mesher<'_> {
                         uv[i],
                         0,
                         color,
-                        pack_coords(lighting::with_emission(coords[i], q.light_emission)),
+                        pack_coords(lighting::with_min(coords[i], q.light)),
                     ),
                     uv[i],
                 )
@@ -1717,7 +1730,7 @@ impl Mesher<'_> {
                 opaque,
             } => TileLayer::Layer {
                 layer,
-                translucent: translucent || q.material.force_translucent,
+                translucent: translucent || q.render_type.is_none() && q.material.force_translucent,
                 opaque,
             },
             TileLayer::Skip | TileLayer::Default => own,

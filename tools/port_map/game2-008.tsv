@@ -42,7 +42,7 @@ BundleItem.getBarWidth	port	crates/horizon-items/src/bundle.rs::Contents::bar
 BundleItem.getBarColor	port	crates/horizon-items/src/bundle.rs::Contents::bar	
 BundleItem.removeOneItemFromBundle	port	crates/horizon-items/src/bundle.rs::Contents::remove_one	
 BundleItem.getTooltipImage	port	crates/horizon-items/src/bundle.rs::tooltip_layout	gap: minor: the tooltip_display rule that hides the bundle contents is not checked here
-BundleItem.onDestroyed	missing		same as `BlockItem.onDestroyed`: nothing spills a destroyed item entity's contents
+BundleItem.onDestroyed	port	crates/horizon-client/src/entities.rs::ItemEntity::hurt	the damage that empties an item's health makes the bundle's contents item entities where it lay (`bundle::destroyed`)
 BundleItem.playRemoveOneSound	port	crates/horizon-client/src/game.rs::Game::drop_bundle_content	the menu queues the same sound in menu/bundle.rs
 BundleItem.playInsertSound	port	crates/horizon-client/src/menu/bundle.rs::Menu::carried_bundle_click	queues the insert or insert-fail sound
 BundleItem.playDropContentsSound	port	crates/horizon-client/src/game.rs::Game::drop_bundle_content	
@@ -54,8 +54,8 @@ CrossbowItem.createProjectile	port	crates/horizon-client/src/arrows.rs::Ticker::
 CrossbowItem.getShotPitch	inline	crates/horizon-client/src/game/crossbow.rs::Game::shoot_crossbow	the shot pitch per index is inline
 CrossbowItem.getRandomShotPitch	inline	crates/horizon-client/src/game/crossbow.rs::Game::shoot_crossbow	the random pitch formula is inline
 CrossbowItem.getPowerForTime	inline	crates/horizon-client/src/game/crossbow.rs::Game::tick_crossbow	the charge fraction capped at one is the tick check against the charge time
-DyeColor.getMixedColor	port	crates/horizon-client/src/game/creatures.rs::Game::dye_mix	the colour of the crafting recipe that mixes the two dyes, else one of the two picked at random (`next_boolean`); `creatures.rs:3153`, `:3176` and `:3222` give the offspring of a sheep, wolf or cat its colour with it
-DyeColor.findColorMixInRecipes	port	crates/horizon-client/src/game/creatures.rs::Game::dye_color_mix_in_recipes	the two dyes laid out as a 2x2 crafting grid through `Recipes::find`, and the result read back as a dye colour by its `_dye` suffix
+DyeColor.getMixedColor	port	crates/horizon-client/src/game/creatures.rs::dye_mix	the colour of the crafting recipe that mixes the two dyes, else one of the two picked at random (`next_boolean`); the three breed call sites give a sheep's lamb, a wolf's puppy and a cat's kitten its colour with it
+DyeColor.findColorMixInRecipes	port	crates/horizon-client/src/game/creatures.rs::dye_color_mix_in_recipes	the two dyes laid out as a 2x2 crafting grid through `Recipes::find`, and the result read back as a dye colour by its `_dye` suffix
 FireworkRocketItem.createDispenseConfig	port	crates/horizon-client/src/game/dispenser.rs::Game::dispense_projectile	rocket config: offset 0.5000099, uncertainty 1, power 0.5, event 1004
 FireworkRocketItem.getEntityJustOutsideOfBlockPos	port	crates/horizon-client/src/game/dispenser.rs::Game::dispense_position	the position just outside the dispenser on the facing side
 HangingEntityItem.mayPlace	port	crates/horizon-client/src/game/paintings.rs::Game::place_painting	paintings take no vertical face; an item frame (ItemFrameItem.mayPlace) may go on one and only needs the build height, which place_item_frame checks
