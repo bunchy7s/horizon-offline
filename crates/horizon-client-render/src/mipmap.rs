@@ -91,7 +91,7 @@ fn srgb_to_linear() -> &'static [u16; 256] {
             } else {
                 x / 12.92
             };
-            java_round(linear * 1023.0) as u16
+            horizon_core::jmath::round_f32(linear * 1023.0) as u16
         })
     })
 }
@@ -106,24 +106,9 @@ fn linear_to_srgb() -> &'static [u8; 1024] {
             } else {
                 12.92 * x
             };
-            java_round(srgb * 255.0) as u8
+            horizon_core::jmath::round_f32(srgb * 255.0) as u8
         })
     })
-}
-/// `Math.round(float)`, bit for bit.
-fn java_round(a: f32) -> i32 {
-    let bits = a.to_bits() as i32;
-    let biased_exp = (bits & 0x7F80_0000) >> 23;
-    let shift = (22 + 127) - biased_exp;
-    if shift & -32 == 0 {
-        let mut r = bits & 0x007F_FFFF | 0x0080_0000;
-        if bits < 0 {
-            r = -r;
-        }
-        ((r >> shift) + 1) >> 1
-    } else {
-        a as i32
-    }
 }
 /// `ARGB.alphaFloat`.
 fn alpha_float(p: [u8; 4]) -> f32 {
