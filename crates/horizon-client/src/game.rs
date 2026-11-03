@@ -4065,6 +4065,9 @@ impl Game<'_> {
         let obstacles = horizon_client::entities::ObstacleGrid::new(self.item_entity_collisions());
         let mut nearby = Vec::new();
         let mut bubble_tops = Vec::new();
+        // `ItemUtils.onContainerDestroyed`: what a destroyed item held, and
+        // where it lay, for adding to the level once its own tick is done.
+        let mut destroyed: Vec<(ItemStack, Vec3)> = Vec::new();
         for i in 0..items.len() {
             if removed[i] {
                 // Merged into an earlier item before its own tick: it never ticked.
@@ -4185,6 +4188,9 @@ impl Game<'_> {
             if !environment.alive {
                 removed[i] = true;
                 cells.remove(i, item.position);
+                for stack in environment.spilled {
+                    destroyed.push((stack, item.position));
+                }
             }
         }
         for pos in bubble_tops {
@@ -4194,10 +4200,12 @@ impl Game<'_> {
         items.retain(|_| !removed.next().unwrap_or(false));
         let Some(p) = self.player.as_ref() else {
             self.dropped = items;
+            self.spawn_destroyed_contents(destroyed);
             return;
         };
         if p.health.dead_or_dying() || self.spectator() {
             self.dropped = items;
+            self.spawn_destroyed_contents(destroyed);
             return;
         }
         let w = f64::from(p.dimensions.width) / 2.0;
@@ -4279,6 +4287,21 @@ impl Game<'_> {
             kept.push(item);
         }
         self.dropped = kept;
+        self.spawn_destroyed_contents(destroyed);
+    }
+    /// `ItemUtils.onContainerDestroyed`: each stack a destroyed item held
+    /// becomes an item entity where that item lay (`new ItemEntity(level, x,
+    /// y, z, stack)`), nudged by 0.2 less 0.1 per axis and pickable at once.
+    fn spawn_destroyed_contents(&mut self, destroyed: Vec<(ItemStack, Vec3)>) {
+        for (stack, at) in destroyed {
+            let r = &mut self.world.random;
+            let motion = [
+                r.next_double() * 0.2 - 0.1,
+                r.next_double() * 0.2 - 0.1,
+                r.next_double() * 0.2 - 0.1,
+            ];
+            self.spawn_item(stack, [at.x, at.y, at.z], motion, 0);
+        }
     }
     /// Run vanilla block behaviour against the world through `LevelAccess`.
     fn with_level<R>(
