@@ -5,7 +5,7 @@
 use super::{
     DamageKind, Mob, MobEvent, MobWorld, Species, Who,
     anim::{Poses, State},
-    control::{MoveKind, rotlerp},
+    control::MoveKind,
     goals::{
         Cx, Goal, HurtByTarget, JUMP, LOOK, LookAtPlayer, MOVE, NearestTarget, Prey,
         RandomLookAround, Stroll, goal_clone,
@@ -192,6 +192,11 @@ pub fn client_smoke(m: &mut Mob, events: &mut Vec<MobEvent>) {
         });
     }
 }
+/// `WitherBoss.rotlerp`: turn at most `max` degrees toward `b`, the result
+/// not wrapped (unlike `MoveControl.rotlerp`, which keeps it in 0..360).
+fn head_rotlerp(a: f32, b: f32, max: f32) -> f32 {
+    a + super::living::wrap(b - a).clamp(-max, max)
+}
 /// The side heads turn toward their targets, else back to the body. `find`
 /// gives the position and eye height of the entity a head's target id names.
 fn turn_heads(m: &mut Mob, find: impl Fn(i32) -> Option<([f64; 3], f64)>) {
@@ -203,10 +208,10 @@ fn turn_heads(m: &mut Mob, find: impl Fn(i32) -> Option<([f64; 3], f64)>) {
                 let sd = (xd * xd + zd * zd).sqrt();
                 let y_rot = horizon_core::geometry::trig::atan2_degrees(zd, xd) - 90.0;
                 let x_rot = -horizon_core::geometry::trig::atan2_degrees(yd, sd);
-                m.anim.v[2 + i] = rotlerp(m.anim.v[2 + i], x_rot, 40.0);
-                m.anim.v[i] = rotlerp(m.anim.v[i], y_rot, 10.0);
+                m.anim.v[2 + i] = head_rotlerp(m.anim.v[2 + i], x_rot, 40.0);
+                m.anim.v[i] = head_rotlerp(m.anim.v[i], y_rot, 10.0);
             }
-            None => m.anim.v[i] = rotlerp(m.anim.v[i], m.body_yaw, 10.0),
+            None => m.anim.v[i] = head_rotlerp(m.anim.v[i], m.body_yaw, 10.0),
         }
     }
 }
@@ -485,6 +490,27 @@ pub fn scale(m: &Mob, alpha: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn head_rotlerp_keeps_negative_angles_unwrapped() {
+        assert_eq!(head_rotlerp(-5.0, -20.0, 40.0), -20.0);
+        assert_eq!(head_rotlerp(-5.0, -100.0, 40.0), -45.0);
+        assert_eq!(head_rotlerp(355.0, 10.0, 10.0), 365.0);
+        assert_eq!(head_rotlerp(2.0, -30.0, 10.0), -8.0);
+        assert_eq!(head_rotlerp(-170.0, 170.0, 10.0), -180.0);
+    }
+    #[test]
+    fn head_rotlerp_steps_are_bounded() {
+        let (mut yaw, mut pitch) = (30.0_f32, 0.0_f32);
+        for _ in 0..100 {
+            let (ny, np) = (
+                head_rotlerp(yaw, -100.0, 10.0),
+                head_rotlerp(pitch, -80.0, 40.0),
+            );
+            assert!((ny - yaw).abs() <= 10.0 && (np - pitch).abs() <= 40.0);
+            (yaw, pitch) = (ny, np);
+        }
+        assert_eq!((yaw, pitch), (-100.0, -80.0));
+    }
     #[test]
     fn wither_ignores_wither_friends_only() {
         assert!(shielded_from(Species::Wither, Species::Wither));

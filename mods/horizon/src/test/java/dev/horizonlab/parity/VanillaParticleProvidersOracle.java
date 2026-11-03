@@ -140,6 +140,11 @@ public final class VanillaParticleProvidersOracle {
             return SpellParticleOption.create(castSpell(type), color, scale);
         if (type == ParticleTypes.DRAGON_BREATH) return PowerParticleOption.create(ParticleTypes.DRAGON_BREATH, scale);
         if (type == ParticleTypes.SCULK_CHARGE) return new SculkChargeParticleOptions(scale);
+        if (type == ParticleTypes.GEYSER || type == ParticleTypes.GEYSER_PLUME)
+            return new GeyserParticleOptions(geyser(type), o.get("water_blocks").getAsInt());
+        if (type == ParticleTypes.GEYSER_BASE || type == ParticleTypes.GEYSER_POOF)
+            return new GeyserBaseParticleOptions(geyserBase(type), o.get("water_blocks").getAsInt(),
+                                                 o.get("burst_impulse_base").getAsFloat());
         if (type == ParticleTypes.SHRIEK) return new ShriekParticleOption((int) scale);
         if (type == ParticleTypes.ITEM)
             return new ItemParticleOption(ParticleTypes.ITEM, new ItemStackTemplate(BuiltInRegistries.ITEM.getValue(Identifier.parse(o.get("item").getAsString()))));
@@ -156,6 +161,8 @@ public final class VanillaParticleProvidersOracle {
         throw new AssertionError("no options for " + id);
     }
     @SuppressWarnings("unchecked") static ParticleType<SpellParticleOption> castSpell(ParticleType<?> t) { return (ParticleType<SpellParticleOption>) t; }
+    @SuppressWarnings("unchecked") static ParticleType<GeyserParticleOptions> geyser(ParticleType<?> t) { return (ParticleType<GeyserParticleOptions>) t; }
+    @SuppressWarnings("unchecked") static ParticleType<GeyserBaseParticleOptions> geyserBase(ParticleType<?> t) { return (ParticleType<GeyserBaseParticleOptions>) t; }
     @SuppressWarnings("unchecked") static ParticleType<BlockParticleOption> castBlock(ParticleType<?> t) { return (ParticleType<BlockParticleOption>) t; }
     @SuppressWarnings("unchecked") static ParticleType<ColorParticleOption> castColor(ParticleType<?> t) { return (ParticleType<ColorParticleOption>) t; }
 

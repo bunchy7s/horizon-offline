@@ -84,11 +84,11 @@ PlayerChunkSender.sendChunk	inline	crates/horizon-client/src/lan/hub.rs::Hub::up
 PlayerChunkSender.collectChunksToSend	port	crates/horizon-client/src/lan/hub.rs::Hub::next_batch	closest first within the batch quota; gap: minor: the in-memory player is cut to the quota too, vanilla sends it all pending chunks
 PlayerSafetyServiceTextFilter.createTextFilterFromConfig	skip:service		external chat filter service (Microsoft identity, text-filtering-config); Horizon has no text filter
 PlayerSafetyServiceTextFilter.filterText	skip:service		external chat filter service; Horizon has no text filter
-ServerCommandSuggestionsProvider.tick	inline	crates/horizon-client/src/game/lan_actions.rs::Game::guest_suggestions	gap: minor: no per-tick budget; every request is answered when it arrives
+ServerCommandSuggestionsProvider.tick	port	crates/horizon-client/src/game/lan_actions.rs::Game::guest_try_suggestions	the budget is refilled for each guest once a tick, and the newest request is answered then
 ServerCommandSuggestionsProvider.tryProcessRequest	port	crates/horizon-client/src/game/lan_actions.rs::Game::guest_suggestions	parses the command (after an optional slash) and gets its suggestions
-ServerCommandSuggestionsProvider.limitSuggestionCount	missing		minor: vanilla keeps the first 1000 suggestions; Horizon sends them all
+ServerCommandSuggestionsProvider.limitSuggestionCount	port	crates/horizon-client/src/game/lan_actions.rs::Game::guest_suggestions	the list is cut to its first 1000 suggestions, the range kept
 ServerCommandSuggestionsProvider.trySchedule	inline	crates/horizon-client/src/game/lan_actions.rs::Game::guest_suggestions	gap: minor: no hop to the server thread; the request is handled on its packet
-ServerCommandSuggestionsProvider.request	port	crates/horizon-client/src/game/lan_actions.rs::Game::guest_suggestions	gap: minor: no coalescing of rapid requests; vanilla keeps only the newest text
+ServerCommandSuggestionsProvider.request	port	crates/horizon-client/src/game/lan_actions.rs::Game::guest_suggestions	the newest command text replaces the one not answered yet, as lastRequest does
 ServerCommonPacketListenerImpl.onDisconnect	inline	crates/horizon-client/src/game/integrated.rs::Integrated::halt	gap: minor: unsure: whether a dropped local connection halts the server is not checked
 ServerCommonPacketListenerImpl.onPacketError	missing		vanilla records the exception for the crash report (reportPacketHandlingException); nothing in the tree keeps one — a failing packet is not named anywhere, and every other ServerWatchdog gap here is now closed
 ServerCommonPacketListenerImpl.handleKeepAlive	inline	crates/horizon-client/src/lan/conn.rs::write_loop	gap: minor: read_loop stores the id and write_loop sets the latency; a wrong id is not an instant disconnect

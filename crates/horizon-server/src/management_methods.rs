@@ -189,6 +189,28 @@ fn uuid(id: u128) -> String {
     )
 }
 
+/// A UUID as `UUID.fromString` takes it (8-4-4-4-12 hex digits), or the 32 undashed digits of `UUIDUtil`'s
+/// lenient codec; anything else (a short id, a sign, dashes anywhere) is no UUID.
+fn parse_uuid(text: &str) -> Option<u128> {
+    let digits = match text.len() {
+        32 => text.to_owned(),
+        36 => {
+            let parts: Vec<&str> = text.split('-').collect();
+            let lengths: Vec<usize> = parts.iter().map(|p| p.len()).collect();
+            if lengths != [8, 4, 4, 4, 12] {
+                return None;
+            }
+            parts.concat()
+        }
+        _ => return None,
+    };
+    digits
+        .bytes()
+        .all(|b| b.is_ascii_hexdigit())
+        .then(|| u128::from_str_radix(&digits, 16).ok())
+        .flatten()
+}
+
 /// A `PlayerDto` from a request: an id, a name, or both.
 fn player_dto(value: &Value) -> Result<(Option<u128>, Option<String>), Failure> {
     let Some(object) = value.as_object() else {
@@ -198,7 +220,7 @@ fn player_dto(value: &Value) -> Result<(Option<u128>, Option<String>), Failure> 
         None => None,
         Some(id) => Some(
             id.as_str()
-                .and_then(|s| u128::from_str_radix(&s.replace('-', ""), 16).ok())
+                .and_then(parse_uuid)
                 .ok_or_else(|| invalid_params(format!("Invalid UUID: {id}")))?,
         ),
     };
@@ -770,6 +792,25 @@ fn ban(who: (&str, Value), reason: &Option<String>, source: &str, expires: Optio
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_player_id_must_be_a_whole_uuid() {
+        use super::player_dto;
+        let id = |s: &str| player_dto(&serde_json::json!({ "id": s })).map(|(id, _)| id);
+        let want = Some(0x0123_4567_89ab_cdef_0123_4567_89ab_cdefu128);
+        assert_eq!(id("01234567-89ab-cdef-0123-456789abcdef").unwrap(), want);
+        assert_eq!(id("0123456789abcdef0123456789abcdef").unwrap(), want);
+        for bad in [
+            "abc",
+            "1",
+            "+123456789abcdef0123456789abcdef",
+            "0123-4567-89ab-cdef-0123456789abcdef",
+            "01234567-89ab-cdef-0123-456789abcdeg",
+            "",
+        ] {
+            assert!(id(bad).is_err(), "{bad:?} is no UUID");
+        }
+    }
+
     use super::*;
 
     fn shared() -> std::sync::Arc<Shared> {
