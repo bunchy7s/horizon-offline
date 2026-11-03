@@ -97,6 +97,12 @@ pub fn pinned_dark(choice: Appearance) -> Option<bool> {
 impl Theme {
     /// The pinned look (`pinned_dark`: dark unless the player picked another), the system's when
     /// they asked to follow it, in the player's accent.
+    /// This look under another sky (a launcher theme from the Wardrobe), top to bottom.
+    pub fn with_sky(mut self, sky: [u32; 6]) -> Self {
+        self.night.sky = sky;
+        self
+    }
+
     pub fn for_appearance(choice: Appearance, accent: Accent, system: WindowAppearance) -> Self {
         let system_dark = !matches!(
             system,

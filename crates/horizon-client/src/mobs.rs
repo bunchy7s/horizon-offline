@@ -855,6 +855,8 @@ pub fn anger_left(anger_end: i64, game_time: i64) -> i32 {
 /// Species-specific persistent state (variants, colours, taming, ageing...).
 #[derive(Clone, Debug, Default)]
 pub struct Extra {
+    /// Saved fish/axolotl bucket flag; tadpoles save a constant true value.
+    pub from_bucket: bool,
     /// Command-created armor instances, shared by commands and runtime damage.
     pub armor_attributes: Option<Box<horizon_world::attributes::entity::EntityAttributes>>,
     /// `Mob.lootTable`: the table its death rolls instead of its type's
