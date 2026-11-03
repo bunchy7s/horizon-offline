@@ -6,7 +6,7 @@
 //! configuration, `finish_configuration` to play, and `start_configuration` / `configuration_acknowledged`
 //! back to configuration.
 use std::{
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     sync::{
         Mutex,
         atomic::{AtomicU8, Ordering},
@@ -47,6 +47,13 @@ pub struct Session {
     writing: AtomicU8,
     /// Entity UUIDs by network id, for a server that is told which entity a spectator picked by its UUID.
     pub(super) uuids: Mutex<HashMap<i32, u128>>,
+    /// Entity types (pinned ids) by network id, for entity data laid out by type.
+    pub(super) kinds: Mutex<HashMap<i32, i32>>,
+    /// Packets the translation made, for Horizon to read before the next one from the server
+    /// (pinned id, payload).
+    pub(super) incoming: Mutex<VecDeque<(i32, Vec<u8>)>>,
+    /// Packet bodies to send right after the one being sent.
+    pub(super) outgoing: Mutex<Vec<Vec<u8>>>,
 }
 
 impl Session {
@@ -56,6 +63,9 @@ impl Session {
             reading: AtomicU8::new(0),
             writing: AtomicU8::new(0),
             uuids: Mutex::new(HashMap::new()),
+            kinds: Mutex::new(HashMap::new()),
+            incoming: Mutex::new(VecDeque::new()),
+            outgoing: Mutex::new(Vec::new()),
         }
     }
     pub fn reading(&self) -> State {
@@ -135,6 +145,15 @@ impl Session {
         w.varint(mapped);
         w.bytes(&payload);
         Ok(Some(w.data))
+    }
+
+    /// A packet the translation made that Horizon reads next, already in the pinned version's numbering.
+    pub fn next_incoming(&self) -> Option<(i32, Vec<u8>)> {
+        self.incoming.lock().unwrap().pop_front()
+    }
+    /// Bodies the translation added after the packet just sent, in the server's numbering.
+    pub fn take_outgoing(&self) -> Vec<Vec<u8>> {
+        std::mem::take(&mut *self.outgoing.lock().unwrap())
     }
 
     /// The handshake states this server's protocol, and its intent moves both directions on.

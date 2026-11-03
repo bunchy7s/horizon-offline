@@ -359,6 +359,9 @@ impl ConnReader {
     }
     /// Block until a whole packet arrives: (id, payload).
     pub fn recv(&mut self) -> Result<(i32, Vec<u8>)> {
+        if let Some(packet) = self.adapter.as_ref().and_then(|a| a.next_incoming()) {
+            return Ok(packet);
+        }
         loop {
             let pending = &self.buffer[self.start..self.end];
             let mut wanted = 0;
@@ -372,6 +375,9 @@ impl ConnReader {
                             None => return Ok(packet),
                             Some(a) => {
                                 if let Some(packet) = a.clientbound(packet.0, packet.1)? {
+                                    return Ok(packet);
+                                }
+                                if let Some(packet) = a.next_incoming() {
                                     return Ok(packet);
                                 }
                             }
@@ -468,11 +474,14 @@ impl ConnWriter {
     }
     /// Send one packet body (VarInt id + payload).
     pub fn send(&mut self, body: &[u8]) -> Result<()> {
-        if let Some(a) = &self.adapter {
-            return match a.serverbound(body)? {
-                Some(body) => self.send_contents(&frame::contents(&body, self.threshold)?),
-                None => Ok(()),
-            };
+        if let Some(a) = self.adapter.clone() {
+            if let Some(body) = a.serverbound(body)? {
+                self.send_contents(&frame::contents(&body, self.threshold)?)?;
+            }
+            for body in a.take_outgoing() {
+                self.send_contents(&frame::contents(&body, self.threshold)?)?;
+            }
+            return Ok(());
         }
         self.send_contents(&frame::contents(body, self.threshold)?)
     }
