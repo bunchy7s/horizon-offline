@@ -1246,8 +1246,38 @@ where
             if let Some(state) = pipeline.structures.as_mut() {
                 state.fixed_biome = generator["biome_source"]["type"] == "minecraft:fixed";
             }
+            // ChunkGenerator.createState reads getOrigin: a noise generator
+            // answers the chunk of its NoiseSpawnFinder position, others
+            // chunk 0 0. Only a dimension-origin structure set reads it.
+            if pipeline
+                .structures
+                .as_ref()
+                .is_some_and(|state| state.needs_dimension_origin())
+                && let Ok([x, z]) = pipeline.spawn_column()
+            {
+                let origin = ChunkPos::new(x >> 4, z >> 4);
+                if let Some(state) = pipeline.structures.as_mut() {
+                    state.set_dimension_origin(origin);
+                }
+            }
         }
         Ok(pipeline)
+    }
+    /// `NoiseBasedChunkGenerator.getOrigin`'s spawn column: the
+    /// NoiseSpawnFinder position, or 0 0 when the noise settings have no
+    /// spawn target (`ChunkGenerator.getOrigin`). Cached.
+    fn spawn_column(&self) -> Result<[i32; 2], GeneratorError> {
+        if let Some(position) = self.spawn_position.get() {
+            return Ok(*position);
+        }
+        // ChunkGenerator.getOrigin is 0 0 without a spawn target.
+        let position = if self.spawn_target.is_empty() {
+            [0, 0]
+        } else {
+            find_spawn_position(&self.spawn_target, &mut SamplerContext::cached())
+                .map_err(|e| GeneratorError::Stage("spawn search", e.to_string()))?
+        };
+        Ok(*self.spawn_position.get_or_init(|| position))
     }
     /// Manual placement reads the registry without enabling the automatic
     /// structure state, its placement sets, starts or locate searches.
@@ -2608,17 +2638,7 @@ where
         Box::new(self.region_random_at(center))
     }
     fn spawn_position(&self) -> Result<[i32; 2], GeneratorError> {
-        if let Some(position) = self.spawn_position.get() {
-            return Ok(*position);
-        }
-        // ChunkGenerator.getOrigin is 0 0 without a spawn target.
-        let position = if self.spawn_target.is_empty() {
-            [0, 0]
-        } else {
-            find_spawn_position(&self.spawn_target, &mut SamplerContext::cached())
-                .map_err(|e| GeneratorError::Stage("spawn search", e.to_string()))?
-        };
-        Ok(*self.spawn_position.get_or_init(|| position))
+        self.spawn_column()
     }
     fn locate(
         &self,
@@ -3414,16 +3434,29 @@ impl OverworldGenerator {
         dimension: &str,
         with_structures: bool,
     ) -> Result<Self, GeneratorError> {
-        let preset_json: Value = serde_json::from_str(
-            data.world_presets
-                .get(preset)
-                .ok_or_else(|| resource(format!("missing world preset {preset}")))?,
-        )?;
-        // A data pack's level stem replaces the preset's, as the world's
-        // dimension registry does.
-        let stem = match data.dimensions.get(dimension) {
-            Some(json) => serde_json::from_str(json)?,
-            None => preset_json["dimensions"][dimension].clone(),
+        Self::for_world_with_settings(data, seed, preset, dimension, with_structures, None)
+    }
+    /// A saved level stem supplies the generator and dimension type when no data
+    /// pack replaces that dimension. Worlds without one use the preset's stem.
+    pub fn for_world_with_settings(
+        data: Arc<GeneratorData>,
+        seed: i64,
+        preset: &str,
+        dimension: &str,
+        with_structures: bool,
+        saved_stem: Option<&Value>,
+    ) -> Result<Self, GeneratorError> {
+        let stem = if let Some(json) = data.dimensions.get(dimension) {
+            serde_json::from_str(json)?
+        } else if let Some(stem) = saved_stem {
+            stem.clone()
+        } else {
+            let preset_json: Value = serde_json::from_str(
+                data.world_presets
+                    .get(preset)
+                    .ok_or_else(|| resource(format!("missing world preset {preset}")))?,
+            )?;
+            preset_json["dimensions"][dimension].clone()
         };
         let generator = stem["generator"].clone();
         // The level's build range: its dimension type's, a data pack's

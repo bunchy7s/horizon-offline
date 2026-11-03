@@ -7,7 +7,7 @@ pub(super) use data::place_summoned;
 mod effects;
 pub(super) mod execute;
 pub(super) mod extra;
-mod items;
+pub(in crate::game) mod items;
 mod misc;
 mod place;
 mod players;
@@ -174,6 +174,21 @@ impl Game<'_> {
         {
             self.native_player_level_change(player, &name, from, to);
         }
+    }
+
+    /// `PlayerXpEvent.XpChange` for a `Player.giveExperiencePoints` of `amount`
+    /// points: the amount to give, or `None` when a mod cancelled it.
+    pub(super) fn xp_change(&mut self, amount: i32) -> Option<i32> {
+        if horizon_client::mod_api::mods().is_empty() {
+            return Some(amount);
+        }
+        let (Some(player), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone())
+        else {
+            return Some(amount);
+        };
+        let (mut amount, mut cancel) = (amount, false);
+        self.native_player_xp_change(player, &name, &mut amount, &mut cancel);
+        (!cancel).then_some(amount)
     }
 
     /// Commands.performCommand for a line without its slash.
@@ -643,14 +658,22 @@ impl Game<'_> {
                 Some(g) => self.player_text(&g.name, g.uuid),
                 None => Text::empty(),
             },
+            // ItemEntity.getName: its CustomName, else the stack's item name
+            // (`getItemName`: `minecraft:item_name`, else the item's own).
             Target::Item(id) => {
-                let item = self
-                    .dropped
-                    .iter()
-                    .find(|i| i.id == id)
-                    .map(|i| i.stack.item.to_string())
-                    .unwrap_or_default();
-                Text::literal(self.pack.names.display_item(&item))
+                if let Some(c) = self.persist_raw(id).and_then(|r| r.get("CustomName")) {
+                    return horizon_client::scoreboard::comp_text(
+                        &horizon_client::scoreboard::tag_to_json(c),
+                    );
+                }
+                let stack = self.dropped.iter().find(|i| i.id == id).map(|i| &i.stack);
+                match stack.and_then(|s| s.item_name()) {
+                    Some(name) => Text::literal(name),
+                    None => {
+                        let item = stack.map(|s| s.item.to_string()).unwrap_or_default();
+                        Text::literal(self.pack.names.display_item(&item))
+                    }
+                }
             }
             // FallingBlockEntity.getTypeName: `entity.minecraft.falling_block_type`
             // with the block's name.
@@ -664,19 +687,11 @@ impl Game<'_> {
                 let block = Text::translate(&format!("block.{block}"), &[]);
                 Text::translate("entity.minecraft.falling_block_type", &[block])
             }
-            Target::Mob(id)
-                if self
-                    .mobs
-                    .iter()
-                    .any(|m| m.id == id && m.custom_name.is_some()) =>
-            {
-                let name = self
-                    .mobs
-                    .iter()
-                    .find(|m| m.id == id)
-                    .and_then(|m| m.custom_name.clone());
-                Text::literal(name.unwrap_or_default())
-            }
+            Target::Mob(id) => self
+                .mobs
+                .iter()
+                .find(|m| m.id == id)
+                .map_or_else(|| Text::translate("entity.", &[]), |m| m.command_name()),
             other => {
                 // Entity.getDisplayName: the CustomName component, else the type.
                 let custom = match other {
@@ -1084,6 +1099,9 @@ impl Game<'_> {
             "ban-ip" | "pardon-ip" => self.cmd_ip_bans(id, ctx),
             id if id.starts_with("banlist") => self.cmd_banlist(id),
             id if id.starts_with("whitelist.") => self.cmd_whitelist(id, ctx),
+            "stop" => self.cmd_stop(),
+            "save-all" => self.cmd_save_all(),
+            "save-off" | "save-on" => self.cmd_auto_save(id == "save-on"),
             "transfer" => self.cmd_transfer(ctx),
             "fetchprofile" => self.cmd_fetchprofile(ctx),
             "publish" => self.cmd_publish(ctx),
@@ -2173,6 +2191,8 @@ impl Game<'_> {
         self.feedback(message);
         Ok(targets.len() as i32)
     }
+    /// `SummonCommand.createEntity`: Peaceful admission uses the entity-type
+    /// policy for both forms, independently of the mob category.
     fn cmd_summon(&mut self, ctx: &Context) -> R<i32> {
         let Some(Arg::Resource(kind)) = ctx.get("entity").cloned() else {
             return Ok(0);
@@ -2194,18 +2214,12 @@ impl Game<'_> {
         {
             return Err(err("commands.summon.invalidPosition", &[]));
         }
+        if self.ui.difficulty == 0 && !horizon_client::mobs::finalize::allowed_in_peaceful(&kind) {
+            return Err(err("commands.summon.failed.peaceful", &[]));
+        }
         let short = kind.trim_start_matches("minecraft:").to_owned();
         if let Some(Arg::Str(nbt)) = ctx.get("nbt").cloned() {
             // With an NBT argument the entity is built from it, unfinalized.
-            if self.ui.difficulty == 0
-                && self
-                    .res
-                    .mob_types()
-                    .get(&kind)
-                    .is_some_and(|t| t.category == "monster")
-            {
-                return Err(err("commands.summon.failed.peaceful", &[]));
-            }
             let before = self.spawned_mark();
             let name = match self.summon_with_nbt(&kind, pos, &nbt)? {
                 Some(target) => self.target_name(target),
@@ -2220,10 +2234,7 @@ impl Game<'_> {
             return Ok(1);
         }
         let name;
-        if let Some(t) = self.res.mob_types().get(&kind).cloned() {
-            if self.ui.difficulty == 0 && t.category == "monster" {
-                return Err(err("commands.summon.failed.peaceful", &[]));
-            }
+        if self.res.mob_types().contains_key(&kind) {
             self.spawn_mob_spawned(&short, pos)
                 .ok_or_else(|| err("commands.summon.failed.uuid", &[]))?;
             name = Text::translate(&entity_name_key(&kind), &[]);
@@ -3037,7 +3048,7 @@ impl Game<'_> {
                 // boundary and emits the level-change hook itself.
                 self.give_levels(amount);
                 return true;
-            } else {
+            } else if let Some(amount) = self.xp_change(amount) {
                 self.give_points(amount);
             }
         } else if levels {

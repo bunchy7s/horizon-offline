@@ -234,7 +234,11 @@ impl RegionFile {
         if external {
             let temporary = directory.join(format!(".c.{}.{}.mcc.tmp", chunk.x, chunk.z));
             let written = File::create(&temporary)
-                .and_then(|mut f| f.write_all(&record.compressed))
+                .and_then(|mut f| {
+                    f.write_all(&record.compressed)?;
+                    // The region's sync only covers the stub, not this external payload.
+                    f.sync_all()
+                })
                 .and_then(|_| fs::rename(&temporary, &external_file));
             if let Err(e) = written {
                 let _ = fs::remove_file(&temporary);

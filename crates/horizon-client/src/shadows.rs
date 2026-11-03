@@ -68,12 +68,7 @@ pub fn mob_shadow_radius(m: &Mob) -> f32 {
         S::Pufferfish => return 0.1 + 0.1 * m.extra.size as f32,
         _ => {}
     }
-    let scale = if m.extra.model_scale > 0.0 {
-        m.extra.model_scale
-    } else {
-        1.0
-    };
-    let radius = shadow_params(&m.kind.id).0 * scale;
+    let radius = shadow_params(&m.kind.id).0 * m.model_scale();
     if matches!(&*m.kind.id, "minecraft:player" | "minecraft:mannequin") || !m.is_baby() {
         return radius;
     }
