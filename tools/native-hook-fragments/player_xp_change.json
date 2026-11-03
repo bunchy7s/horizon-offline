@@ -1,0 +1,17 @@
+{
+  "hooks": [
+    {
+      "name": "player_xp_change",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_xp_change",
+      "neoforge": "PlayerXpEvent.XpChange",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    }
+  ],
+  "rust_summary": "experience points a server player is about to gain, changeable or cancelled (`native_player_xp_change`).",
+  "doc_summary": "experience points a player is about to gain, as NeoForge's `PlayerXpEvent.XpChange`: `native_player_xp_change(player, name, amount, cancel)` runs on the server at `Player.giveExperiencePoints`: orb pickups (after mending), advancement rewards and `/xp add ... points`. A mod may change `amount` or cancel. `native_player_exp_change` stays: it hears orb pickups only, and cannot cancel. Bundles need \"hooks\": @API:player_xp_change@."
+}

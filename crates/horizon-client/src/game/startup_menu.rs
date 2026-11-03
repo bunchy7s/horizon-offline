@@ -604,14 +604,22 @@ impl Loading {
                     self.settings.narrator(),
                     &mut self.menu.narrator_toast,
                 ),
+                // The startup menu has no screen stack for ConfirmLinkScreen;
+                // the link opens directly, as the menu's other links do.
+                Event::AccessibilityHelp => {
+                    super::packs::open_uri(super::options::ACCESSIBILITY_HELP_LINK)
+                }
                 // Mods' settings pages open only in a running game.
                 Event::NativeSettings(_) | Event::NativeButton(..) => {}
                 // The startup menu runs before the game opens a control socket,
-                // and before its sound engine (no clicks, no volume previews).
+                // and before its sound engine (no clicks, no volume previews,
+                // and no music tracks to list or play).
                 Event::ButtonClick
                 | Event::CopyAgentDetails
                 | Event::ToggleRecording
                 | Event::ExportRepro
+                | Event::ListMusicTracks
+                | Event::PlayMusicTrack(..)
                 | Event::Volume(..) => {}
             }
         }
@@ -1062,6 +1070,22 @@ impl Loading {
                         );
                         self.menu_action(event_loop, action);
                     }
+                }
+            }
+            // AbstractSelectionList.mouseClicked: a world row takes a click
+            // of any button, so the middle one selects it without joining.
+            WindowEvent::MouseInput {
+                state: ElementState::Pressed,
+                button: MouseButton::Middle,
+                ..
+            } => {
+                let batch = HudBatch::new(self.menu_size());
+                if let Some(title) = &mut self.menu.title {
+                    title.select_world_at(
+                        self.menu.cursor.0,
+                        self.menu.cursor.1,
+                        (batch.width, batch.height),
+                    );
                 }
             }
             WindowEvent::MouseWheel { delta, .. } => {

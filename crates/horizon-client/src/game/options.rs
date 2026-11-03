@@ -11,6 +11,9 @@ use horizon_client::{
 use serde_json::{Value, json};
 use winit::{event::MouseButton, keyboard::KeyCode, window::Fullscreen};
 
+/// `CommonLinks.ACCESSIBILITY_HELP`, the Accessibility page's footer link.
+pub(super) const ACCESSIBILITY_HELP_LINK: &str = "https://aka.ms/MinecraftJavaAccessibility";
+
 pub(super) const CONTROL_HELP: &[&str] = &[
     "options-get [KEY...]           options.txt values by key, with their type, range or choices",
     "options-set KEY VALUE          set an option (enums by name, keys as key.keyboard.w, lists as JSON), apply and save it",
@@ -336,6 +339,9 @@ impl Game<'_> {
                 // The AI Agent page's repro buttons (game/repro.rs).
                 Event::ToggleRecording => self.toggle_recording_key(),
                 Event::ExportRepro => self.export_repro_key(),
+                // The Music page: the situations' tracks, and playing one now.
+                Event::ListMusicTracks => self.ui.options.music_groups = self.music_groups(),
+                Event::PlayMusicTrack(event, track) => self.play_music_track(&event, &track),
                 Event::Close if self.ui.options.resource_error.is_some() => {}
                 Event::Close => {
                     self.settings.save(&Self::options_path());
@@ -412,6 +418,11 @@ impl Game<'_> {
                 Event::NativeSettings(i) => self.native_settings_refresh(i),
                 Event::NativeButton(i, b) => self.native_settings_event(i, b),
                 Event::Credits => self.open_win_screen(false, super::win::Finish::Options),
+                // AccessibilityOptionsScreen's link button: ConfirmLinkScreen
+                // back to the options screen.
+                Event::AccessibilityHelp => {
+                    self.confirm_trusted_link(ACCESSIBILITY_HELP_LINK, Screen::Options)
+                }
                 Event::Narrator => self.narrator_status_changed(),
             }
         }
@@ -621,7 +632,7 @@ impl Game<'_> {
             }
             horizon_client::graphics::Pacing::Efficient => {
                 let mut clock = horizon_client::window::SleepingClock(self.frame_clock);
-                horizon_client::window::end_frame(&mut self.limiter, limit, &mut clock);
+                horizon_client::window::end_frame_on_grid(&mut self.limiter, limit, &mut clock);
             }
         }
     }

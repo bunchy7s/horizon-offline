@@ -42,7 +42,8 @@ pub enum Message {
     Icon(String, Vec<u8>),
     /// A pack landed in the packs folder under this file name.
     Downloaded(String),
-    /// Already translated where it reaches the screen.
+    /// A technical reason in English: the screen shows it inside
+    /// `horizon.pack.addFailed`.
     Failed(String),
 }
 

@@ -184,6 +184,9 @@ impl Dynamic {
             if let Some(Tag::Byte(v)) = map.get(&JavaString::from("has_skylight")) {
                 d.has_skylight = *v != 0;
             }
+            if let Some(Tag::Byte(v)) = map.get(&JavaString::from("has_ceiling")) {
+                d.has_ceiling = *v != 0;
+            }
             // DimensionType.defaultClock: the world clock this level's day
             // time follows (absent in the Nether).
             d.default_clock = match map.get(&JavaString::from("default_clock")) {
@@ -206,16 +209,20 @@ pub struct DimensionType {
     pub height: i32,
     pub logical_height: i32,
     pub has_skylight: bool,
+    /// `DimensionType.hasCeiling`: weather, spawning and maps read it.
+    pub has_ceiling: bool,
     /// `DimensionType.defaultClock`: the `minecraft:world_clock` this level
     /// samples for day time (`None` in the Nether).
     pub default_clock: Option<String>,
 }
 impl DimensionType {
     pub fn vanilla(name: &str) -> Self {
-        let (min_y, height, logical_height, has_skylight, default_clock) = match name {
-            "minecraft:the_nether" => (0, 256, 128, false, None),
-            "minecraft:the_end" => (0, 256, 256, true, Some("minecraft:the_end")),
-            _ => (-64, 384, 384, true, Some("minecraft:overworld")),
+        let (min_y, height, logical_height, has_skylight, has_ceiling, default_clock) = match name {
+            "minecraft:the_nether" => (0, 256, 128, false, true, None),
+            "minecraft:the_end" => (0, 256, 256, true, false, Some("minecraft:the_end")),
+            // overworld_caves builds like the Overworld but has a ceiling.
+            "minecraft:overworld_caves" => (-64, 384, 384, true, true, Some("minecraft:overworld")),
+            _ => (-64, 384, 384, true, false, Some("minecraft:overworld")),
         };
         Self {
             name: name.to_owned(),
@@ -223,6 +230,7 @@ impl DimensionType {
             height,
             logical_height,
             has_skylight,
+            has_ceiling,
             default_clock: default_clock.map(str::to_owned),
         }
     }
@@ -281,6 +289,8 @@ mod tests {
         );
         assert_eq!(d.dimension(1).sections(), 16);
         assert!(!d.dimension(1).has_skylight);
+        // The type's data leaves has_ceiling out; the Nether default holds.
+        assert!(d.dimension(1).has_ceiling);
         assert_eq!(d.dimension(1).default_clock, None);
         assert_eq!(ceil_log2(35723), 16);
         assert_eq!(ceil_log2(65), 7);

@@ -98,7 +98,14 @@ impl PackInfo {
 /// sampled into its 32x32 square. None when it does not decode, where
 /// `loadPackIcon` falls back to `unknown_pack`.
 pub fn load_icon(png: &[u8]) -> Option<Arc<[u8]>> {
-    let (w, h, rgba) = crate::hud::decode_bytes(png).ok()?;
+    scale_icon(crate::hud::decode_bytes(png).ok()?)
+}
+/// A project icon Modrinth served (PNG, WebP or JPEG,
+/// [`crate::hud::decode_image_bytes`]), scaled as [`load_icon`] scales a pack's.
+pub fn load_fetched_icon(bytes: &[u8]) -> Option<Arc<[u8]>> {
+    scale_icon(crate::hud::decode_image_bytes(bytes).ok()?)
+}
+fn scale_icon((w, h, rgba): (u32, u32, Vec<u8>)) -> Option<Arc<[u8]>> {
     if w == 0 || h == 0 {
         return None;
     }
@@ -1156,7 +1163,16 @@ impl PackScreen {
         let (bx, by) = self.back_button();
         let back_hover = d::inside(mouse, bx, by, BACK_W, BACK_H);
         d::button(
-            out, m, &tr("gui.back"), bx, by, BACK_W, BACK_H, true, back_hover, now_ms,
+            out,
+            m,
+            &tr("gui.back"),
+            bx,
+            by,
+            BACK_W,
+            BACK_H,
+            true,
+            back_hover,
+            now_ms,
         );
         // The search row: its box and the button that runs it.
         let (qx, qy) = self.browser_search_box();
@@ -1203,15 +1219,23 @@ impl PackScreen {
         let message = if browser.busy && browser.installing.is_none() {
             Some(tr("horizon.pack.addWorking"))
         } else if let Some(status) = &browser.status {
-            Some(Text::literal(status.clone()))
+            Some(Text::translate(
+                "horizon.pack.addFailed",
+                &[Text::literal(status.clone())],
+            ))
         } else if browser.hits.is_empty() {
             Some(tr("horizon.pack.addNone"))
         } else {
             None
         };
         if let Some(message) = message {
-            let lines =
-                d::label_lines(m, &message.with_color(d::GRAY), pw - 8, 6, &Style::default());
+            let lines = d::label_lines(
+                m,
+                &message.with_color(d::GRAY),
+                pw - 8,
+                6,
+                &Style::default(),
+            );
             d::label(out, &lines, px + 4, py + 20, pw - 8, true);
             return;
         }
@@ -1226,7 +1250,14 @@ impl PackScreen {
                 break;
             }
             let over = d::inside(mouse, cx, cy, cw, ch);
-            d::fill(out, cx, cy, cx + cw, cy + ch, if over { CARD_HOVER } else { CARD });
+            d::fill(
+                out,
+                cx,
+                cy,
+                cx + cw,
+                cy + ch,
+                if over { CARD_HOVER } else { CARD },
+            );
             // The icon, once one has arrived: `bind_icons` swaps the texture
             // for the atlas slot it patched the PNG into.
             let texture = icon_texture(&hit.id);
@@ -1279,7 +1310,14 @@ impl PackScreen {
                 &Style::default(),
             );
             // Below the icon, which is the tallest thing in the top row.
-            d::label(out, &lines, cx + CARD_PAD, cy + CARD_PAD + ICON + 5, body_w, false);
+            d::label(
+                out,
+                &lines,
+                cx + CARD_PAD,
+                cy + CARD_PAD + ICON + 5,
+                body_w,
+                false,
+            );
             let (ix, iy) = self.install_button(i);
             let done = browser.installed.contains(&(i as usize));
             let running = browser.installing == Some(i as usize);
@@ -1673,8 +1711,14 @@ mod click_sound_tests {
             let (cx, cy, cw, ch) = screen.card_box(0);
             let (ix, iy) = screen.install_button(0);
             // Install stays inside its card.
-            assert!(ix >= cx && ix + INSTALL_W <= cx + cw, "install escapes the card");
-            assert!(iy >= cy && iy + BACK_H <= cy + ch, "install escapes the card");
+            assert!(
+                ix >= cx && ix + INSTALL_W <= cx + cw,
+                "install escapes the card"
+            );
+            assert!(
+                iy >= cy && iy + BACK_H <= cy + ch,
+                "install escapes the card"
+            );
             // The name column ends before Install begins, so the two cannot
             // be drawn over one another.
             let text_x = cx + CARD_PAD + ICON + CARD_PAD;
@@ -1685,7 +1729,10 @@ mod click_sound_tests {
             );
             // The description starts below the icon rather than across it.
             let description_top = cy + CARD_PAD + ICON + 5;
-            assert!(description_top >= cy + CARD_PAD + ICON, "text over the icon");
+            assert!(
+                description_top >= cy + CARD_PAD + ICON,
+                "text over the icon"
+            );
             // And it still fits in the card with both its lines.
             assert!(description_top + 18 <= cy + ch, "the description overflows");
         }
@@ -1697,8 +1744,15 @@ mod click_sound_tests {
             crate::hud::HudAtlas::build(std::path::Path::new("/nonexistent/horizon-test-assets"))
                 .unwrap();
         let m = Measure(&atlas.font);
-        let mut screen =
-            PackScreen::new(&m, tr("resourcePack.title"), 480, 320, false, Vec::new(), &[]);
+        let mut screen = PackScreen::new(
+            &m,
+            tr("resourcePack.title"),
+            480,
+            320,
+            false,
+            Vec::new(),
+            &[],
+        );
         screen.browsing_allowed = true;
         // The Add button opens the browser.
         let (ax, ay) = screen.add_button(&m);

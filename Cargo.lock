@@ -373,6 +373,7 @@ version = "0.1.0"
 dependencies = [
  "horizon-mods",
  "serde_json",
+ "zip",
 ]
 
 [[package]]
@@ -1272,6 +1273,7 @@ name = "horizon-assets"
 version = "0.1.0"
 dependencies = [
  "horizon-core",
+ "log",
  "png",
  "serde",
  "serde_json",
@@ -1324,6 +1326,7 @@ dependencies = [
  "horizon-client-render",
  "horizon-command",
  "horizon-core",
+ "horizon-cosmetics",
  "horizon-dualsense",
  "horizon-friends",
  "horizon-hdr",
@@ -1456,6 +1459,7 @@ dependencies = [
  "horizon-client-input",
  "horizon-command",
  "horizon-core",
+ "horizon-cosmetics",
  "horizon-hdr",
  "horizon-items",
  "horizon-narrator",
@@ -1494,6 +1498,7 @@ name = "horizon-command"
 version = "0.1.0"
 dependencies = [
  "horizon-client-core",
+ "horizon-core",
  "horizon-protocol",
  "horizon-world",
 ]
@@ -1503,6 +1508,18 @@ name = "horizon-core"
 version = "0.1.0"
 dependencies = [
  "libm",
+]
+
+[[package]]
+name = "horizon-cosmetics"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "glam",
+ "png",
+ "serde",
+ "serde_json",
+ "ureq",
 ]
 
 [[package]]
@@ -1631,6 +1648,7 @@ dependencies = [
  "horizon-core",
  "horizon-world",
  "ipconfig",
+ "log",
  "serde_json",
  "sha1",
  "sha2",
@@ -1660,6 +1678,7 @@ dependencies = [
  "ab_glyph",
  "base64",
  "chrono",
+ "getrandom 0.3.4",
  "horizon-anticheat",
  "horizon-bench",
  "horizon-chat-filter",

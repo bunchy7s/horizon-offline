@@ -1,0 +1,17 @@
+{
+  "hooks": [
+    {
+      "name": "baby_entity_spawn",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_baby_entity_spawn",
+      "neoforge": "BabyEntitySpawnEvent",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    }
+  ],
+  "rust_summary": "two animals breeding and a baby about to spawn, cancellable (`native_baby_entity_spawn`).",
+  "doc_summary": "two animals breeding, as NeoForge's `BabyEntitySpawnEvent`: `native_baby_entity_spawn(parent, partner, player, kind, cancel)` runs on the server before the baby is made. `player` is the feeder's UUID (0 for none). Set `cancel` for no baby; the parents still rest and lose their love, but there is no baby, experience, statistic or advancement. Not fired for turtles, frogs, sniffers or villagers. Bundles need \"hooks\": @API:baby_entity_spawn@."
+}

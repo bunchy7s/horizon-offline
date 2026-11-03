@@ -1,0 +1,40 @@
+{
+  "hooks": [],
+  "helpers": [
+    {
+      "name": "entity_nbt",
+      "target": "horizon_client::game::native_entity_data::Game<'_>::native_entity_nbt",
+      "receiver": "entity"
+    },
+    {
+      "name": "entity_merge_nbt",
+      "target": "horizon_client::game::native_entity_data::Game<'_>::native_entity_merge_nbt",
+      "receiver": "entity"
+    },
+    {
+      "name": "entity_tags",
+      "target": "horizon_client::game::native_entity_data::Game<'_>::native_entity_tags",
+      "receiver": "entity"
+    },
+    {
+      "name": "entity_add_tag",
+      "target": "horizon_client::game::native_entity_data::Game<'_>::native_entity_add_tag",
+      "receiver": "entity"
+    },
+    {
+      "name": "entity_remove_tag",
+      "target": "horizon_client::game::native_entity_data::Game<'_>::native_entity_remove_tag",
+      "receiver": "entity"
+    },
+    {
+      "name": "entity_name",
+      "target": "horizon_client::game::native_entity_data::Game<'_>::native_entity_name",
+      "receiver": "entity"
+    }
+  ],
+  "rust_summary": "an entity's data (read and merge, as `/data` does), tags and name through an `EntityRef`.",
+  "doc_summary": "`entity.nbt(host)`, `merge_nbt`, `tags`, `add_tag`, `remove_tag` and `name`. Bundles need \"hooks\": @API:entity_data@.",
+  "comments": [
+    "crates/horizon-client/src/game/native_entity_data.rs"
+  ]
+}
