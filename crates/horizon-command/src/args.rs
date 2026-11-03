@@ -734,6 +734,7 @@ fn parse_coord_double(reader: &mut Reader, center: bool) -> CmdResult<Coord> {
     }
     Ok(Coord { relative, value })
 }
+/// LocalCoordinates.parse / readDouble.
 fn parse_local(reader: &mut Reader) -> CmdResult<Coordinates> {
     let start = reader.cursor;
     let mut v = [0.0; 3];
@@ -749,7 +750,14 @@ fn parse_local(reader: &mut Reader) -> CmdResult<Coordinates> {
             }
             reader.skip();
         }
-        if !reader.can_read() || reader.peek() != '^' {
+        if !reader.can_read() {
+            return Err(CommandError::tr_at(
+                "argument.pos.missing.double",
+                &[],
+                reader,
+            ));
+        }
+        if reader.peek() != '^' {
             reader.cursor = start;
             return Err(CommandError::tr_at("argument.pos.mixed", &[], reader));
         }
@@ -1374,8 +1382,7 @@ impl ArgType {
                         reader,
                     ));
                 };
-                // Math.round(float): floor(x + 0.5).
-                let ticks = (v * m as f32 + 0.5).floor() as i32;
+                let ticks = horizon_core::jmath::round_f32(v * m as f32);
                 if ticks < *min {
                     return Err(CommandError::tr_at(
                         "argument.time.tick_count_too_low",

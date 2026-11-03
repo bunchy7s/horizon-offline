@@ -3,9 +3,10 @@
 client: the real AbstractContainerScreen.mouseClicked/mouseReleased (the slot
 id a click targets, -999 outside the window, and the ContainerInput it sends:
 PICKUP, QUICK_MOVE from the event's own Shift modifiers, THROW, the quick
-craft drag a held stack starts and the drop its release outside makes) and
-hasClickedOutside, with AbstractRecipeBookScreen's and RecipeBookComponent's
-rule for the recipe book screens."""
+craft drag a held stack starts, the drop its release outside makes, and the
+CLONE a Creative player's pick-item button asks for) and hasClickedOutside,
+with AbstractRecipeBookScreen's and RecipeBookComponent's rule for the recipe
+book screens."""
 import json
 import random
 
@@ -40,8 +41,54 @@ def point(rng, left, top, width, height):
     return x, y
 
 
+def pick_case(rng):
+    """A container screen clicked with the pick-item button (the middle mouse).
+
+    `mouseClicked` reads `keyPickItem.matchesMouse(event) && player.hasInfiniteMaterials()`
+    before anything else: a player with infinite materials clones the hovered stack
+    (`CLONE`, or with slot id -999 outside the window) instead of picking it up, and a
+    held stack starts a quick craft drag of its own type instead of a plain one. The
+    release then answers with `CLONE` as long as the carried stack is not empty and the
+    event is the pick-item button, whether or not the press clicked anything, so a
+    Survival player's middle release clones a held stack too (and the server refuses it).
+    """
+    kind = rng.choice(list(CLICKING))
+    width, height = SCREENS[kind] or (176, 114 + 18 * rng.randint(1, 6))
+    left, top = rng.randrange(0, 300), rng.randrange(0, 120)
+    sx, sy = rng.randrange(0, width - 16), rng.randrange(0, height - 16)
+    case = dict(kind=kind, image=[left, top, width, height], slot=[sx, sy],
+                creative=rng.random() < 0.5, events=[])
+
+    def over(on_slot):
+        """A point over the menu's slot (7), or one it does not hover."""
+        if on_slot:
+            return quarter(rng, left + sx - 1, left + sx + 17), quarter(rng, top + sy - 1, top + sy + 17)
+        while True:
+            x, y = point(rng, left, top, width, height)
+            if not (left + sx - 1 <= x < left + sx + 17 and top + sy - 1 <= y < top + sy + 17):
+                return x, y
+
+    for _ in range(rng.randrange(2, 6)):
+        on_slot = rng.random() < 0.6
+        carried = rng.random() < 0.5
+        x, y = over(on_slot)
+        case['events'].append(['press', x, y, 2, rng.choice([0, 0, 1, 2]), carried, on_slot])
+        if rng.random() < 0.25:
+            # Another button's click in between: it leaves the pick-item drag's button alone.
+            bx, by = over(on_slot)
+            case['events'].append([rng.choice(['press', 'release']), bx, by, rng.choice([1, 3]),
+                                   rng.choice([0, 0, 1, 2]), carried, on_slot])
+        if rng.random() < 0.5:
+            x, y = over(on_slot)
+        case['events'].append(['release', x, y, 2, rng.choice([0, 0, 1, 2]), carried, on_slot])
+    return case
+
+
 def cases(rng):
-    for _ in range(4000):
+    for n in range(4000):
+        if n % 4 == 3:
+            yield pick_case(rng)
+            continue
         kind = rng.choice(list(SCREENS))
         width, height = SCREENS[kind] or (176, 114 + 18 * rng.randint(1, 6))
         left, top = rng.randrange(0, 300), rng.randrange(0, 120)
@@ -79,12 +126,13 @@ def make_cases(build):
 
 def main():
     scope = ('The real AbstractContainerScreen.mouseClicked and mouseReleased of ContainerScreen (one to six rows), '
-             'HopperScreen, ShulkerBoxScreen and BeaconScreen with one menu slot, press and release of the left and right '
-             'buttons with the carried stack empty or not and the event Shift modifiers (left, right, both, none), '
+             'HopperScreen, ShulkerBoxScreen and BeaconScreen with one menu slot, press and release of the left, right '
+             'and pick-item (middle) buttons with the carried stack empty or not, the event Shift modifiers (left, '
+             'right, both, none) and a player with and without infinite materials, '
              'recording every slotClicked (slot id, menu button, ContainerInput); and hasClickedOutside of those screens, '
              'MerchantScreen and the recipe book screens (InventoryScreen, CraftingScreen, FurnaceScreen) with the book '
-             'visible or not and its selected tab hovered or not. Drags (mouseDragged, quickCraftToSlots), double '
-             'clicks and keyPickItem cloning are not exercised; the menu clicks themselves are menu_click\'s.')
+             'visible or not and its selected tab hovered or not. Drags (mouseDragged, quickCraftToSlots) and double '
+             'clicks are not exercised; the menu clicks themselves are menu_click\'s.')
     harness.differential(
         'rust-container-screen-parity', 'VanillaContainerScreenOracle', 'container_screen_probe', make_cases, scope,
         sources=[lab.ROOT / 'crates/horizon-client/src/container_screen.rs',

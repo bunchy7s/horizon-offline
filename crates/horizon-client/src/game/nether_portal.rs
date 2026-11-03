@@ -91,6 +91,13 @@ pub(super) struct Portals {
     /// tick, in their level, with their entry: they carry their riders
     /// (`tick_server_travel`).
     carrying: Vec<(Dim, u32, BlockPos)>,
+    /// What a carrying minecart moved by when its portal was handled, at the
+    /// start of its tick: its motion is what crosses (`arrive_vehicle`).
+    pub(super) carried_motion: HashMap<u32, Vec3>,
+    /// Where a carrying vehicle stood then: its plan is taken from there
+    /// (`vehicle_plan`), as vanilla's is, not from where its rider's own tick
+    /// has moved it on to since.
+    pub(super) carried_at: HashMap<u32, Vec3>,
     loaded: bool,
     dirty: bool,
     /// Per-chunk portal palette masks, kept across ticks (portal_sections).
@@ -647,6 +654,14 @@ impl Game<'_> {
             // `Entity.teleportCrossDimension` carries the passengers: a
             // vehicle server players ride takes them along.
             if self.guest_rides(id) {
+                if let Some(c) = self.carts.iter().find(|c| c.id == id) {
+                    self.portals.carried_motion.insert(id, c.velocity);
+                    self.portals.carried_at.insert(id, c.position);
+                } else if let Some(b) = self.boats.iter().find(|b| b.id == id) {
+                    self.portals.carried_at.insert(id, b.position);
+                } else if let Some(m) = self.mobs.iter().find(|m| m.id == id) {
+                    self.portals.carried_at.insert(id, m.position);
+                }
                 self.portals.carrying.push((self.dim, id, entry));
             } else {
                 self.send_through_portal(id, entry);
@@ -690,15 +705,14 @@ impl Game<'_> {
             },
         );
     }
-    /// `canUsePortal(false)` of a mob: alive, riding nothing, not asleep,
-    /// not carrying the player, and not a boss that never travels.
+    /// `canUsePortal(false)` of a mob: what the mob itself decides
+    /// (`mobs::mob_can_use_portal`), riding nothing, not asleep, and not
+    /// carrying the players this side does.
     pub(super) fn mob_can_use_portal(&self, m: &horizon_client::mobs::Mob) -> bool {
-        use horizon_client::mobs::Species;
-        m.alive()
+        horizon_client::mobs::mob_can_use_portal(m)
             && m.extra.mount.is_none()
             && self.riding != Some(m.id)
             && (!self.guest_rides(m.id) || self.carries_riders())
-            && m.species() != Species::Wither
     }
     /// `Entity.canUsePortal(false)` for a primed TNT: it carries no mob.
     pub(super) fn tnt_can_use_portal(&self, id: u32) -> bool {
@@ -735,40 +749,58 @@ impl Game<'_> {
     /// minecart, like a mob, lands in the middle of the exit portal's depth
     /// (`AbstractBoat` and `AbstractMinecart.getRelativePortalPosition`).
     pub(super) fn vehicle_plan(&self, id: u32, entry: BlockPos) -> Option<Plan> {
+        let at = |own: Vec3| self.portals.carried_at.get(&id).copied().unwrap_or(own);
         if let Some(m) = self.mobs.iter().find(|m| m.id == id) {
-            return Some(self.entity_plan(entry, m.position, m.width(), m.height(), true));
+            return Some(self.entity_plan(entry, at(m.position), m.width(), m.height(), true));
         }
         if let Some(b) = self.boats.iter().find(|b| b.id == id) {
             let (width, height) = (super::boats::WIDTH as f32, super::boats::HEIGHT as f32);
-            return Some(self.entity_plan(entry, b.position, width, height, true));
+            return Some(self.entity_plan(entry, at(b.position), width, height, true));
         }
         let c = self.carts.iter().find(|c| c.id == id)?;
         let (width, height) = (
             super::minecarts::WIDTH as f32,
             super::minecarts::HEIGHT as f32,
         );
-        Some(self.entity_plan(entry, c.position, width, height, true))
+        Some(self.entity_plan(entry, at(c.position), width, height, true))
     }
     /// `NetherPortalBlock.entityInside` and `EndPortalBlock.entityInside`
     /// for the items, mobs, empty boats and minecarts, and arrows that moved
     /// this tick: the portal blocks their box swept through (an End portal's
     /// transition time is 0 too).
     pub(super) fn find_entity_portals(&mut self) {
+        self.find_portals(None);
+    }
+    /// The same for the vehicles server players ride, once `tick_guests` has
+    /// moved them: a ridden vehicle moves with its rider, after the other
+    /// entities were swept, so without this pass its portal is found a tick
+    /// late, from where it has already moved on to.
+    pub(super) fn find_ridden_vehicle_portals(&mut self, ridden: &[u32]) {
+        if !ridden.is_empty() {
+            self.find_portals(Some(ridden));
+        }
+    }
+    fn find_portals(&mut self, only: Option<&[u32]>) {
         if self.remote.is_some() {
             return;
         }
+        let ridden = if only.is_none() {
+            self.guest_vehicles()
+        } else {
+            Vec::new()
+        };
         // A trident or rocket in flight gets its id here, before the walk.
         for t in self
             .tridents
             .iter_mut()
-            .filter(|t| !t.in_ground || t.previous != t.position)
+            .filter(|t| only.is_none() && (!t.in_ground || t.previous != t.position))
         {
             super::lan_entities::assign_entity_id(&mut self.next_entity, &mut t.id);
         }
         for r in self
             .rockets
             .iter_mut()
-            .filter(|r| r.attached_to.is_none() && !r.attached)
+            .filter(|r| only.is_none() && r.attached_to.is_none() && !r.attached)
         {
             super::lan_entities::assign_entity_id(&mut self.next_entity, &mut r.id);
         }
@@ -784,6 +816,13 @@ impl Game<'_> {
                 continue;
             }
             let (id, to) = (entity.id(), entity.position());
+            let swept_later = match only {
+                Some(ids) => !ids.contains(&id),
+                None => ridden.contains(&id),
+            };
+            if swept_later {
+                continue;
+            }
             let from = entity
                 .portal_from()
                 .unwrap_or_else(|| self.portals.before.get(&id).copied().unwrap_or(to));

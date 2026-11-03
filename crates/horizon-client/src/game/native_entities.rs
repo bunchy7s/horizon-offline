@@ -118,7 +118,8 @@ fn target_id(t: Target) -> Option<u32> {
         | Target::Falling(id)
         | Target::Rocket(id)
         | Target::Trident(id)
-        | Target::Spawner(id) => Some(id),
+        | Target::Spawner(id)
+        | Target::Cloud(id) => Some(id),
         Target::Player | Target::Guest(_) => None,
     }
 }

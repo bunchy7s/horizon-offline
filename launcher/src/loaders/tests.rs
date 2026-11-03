@@ -51,7 +51,8 @@ fn versions_name_the_stable_ones() {
         "quilt-loader-0.19.2-1.21.4"
     );
     assert_eq!(Kind::parse(" Fabric ").unwrap(), Kind::Fabric);
-    assert!(Kind::parse("forge").is_err());
+    assert_eq!(Kind::parse("NeoForge").unwrap(), Kind::NeoForge);
+    assert!(Kind::parse("liteloader").is_err());
 }
 
 #[test]
