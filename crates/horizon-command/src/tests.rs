@@ -791,7 +791,7 @@ fn the_dedicated_commands_complete_from_the_servers_lists() {
 fn only_a_dedicated_server_has_the_dedicated_commands() {
     // Commands.CommandSelection: an integrated server (single player, a LAN
     // world) registers no /op, /ban, /ban-ip, /banlist, /pardon, /pardon-ip,
-    // /deop or /whitelist, so /help and Tab don't offer them.
+    // /deop, /transfer or /whitelist, so /help and Tab don't offer them.
     let dedicated = [
         "ban",
         "ban-ip",
@@ -800,6 +800,7 @@ fn only_a_dedicated_server_has_the_dedicated_commands() {
         "op",
         "pardon",
         "pardon-ip",
+        "transfer",
         "whitelist",
     ];
     for dev in [false, true] {
@@ -824,6 +825,58 @@ fn only_a_dedicated_server_has_the_dedicated_commands() {
     }
     assert!(vanilla::game_dispatcher().find("ban").is_none());
     assert!(vanilla::release_dispatcher().find("ban").is_none());
+}
+#[test]
+fn a_dedicated_servers_admins_send_players_to_another_server() {
+    // TransferCommand.register: LEVEL_ADMINS, `<hostname> [<port> [<players>]]`
+    // with IntegerArgumentType.integer(1, 65535) for the port.
+    let server = vanilla::game_tree(false, false, true);
+    assert!(
+        vanilla::game_tree(false, false, false)
+            .find("transfer")
+            .is_none()
+    );
+    let at = |level: u8| Registries {
+        permission: level,
+        ..reg()
+    };
+    for line in [
+        "transfer example.net",
+        "transfer example.net 25566",
+        "transfer example.net 25566 Alex",
+    ] {
+        assert_eq!(
+            server.parse(line, &at(3)).executable().unwrap().1,
+            "transfer",
+            "{line}"
+        );
+    }
+    // The hostname is required.
+    let e = server.parse("transfer", &at(3)).executable().unwrap_err();
+    assert_eq!(e.message.plain(), "command.unknown.command");
+    // Below LEVEL_ADMINS the node is not there at all.
+    for level in [0, 1, 2] {
+        let e = server
+            .parse("transfer example.net", &at(level))
+            .executable()
+            .unwrap_err();
+        assert_eq!(
+            e.message.plain(),
+            "command.unknown.command",
+            "level {level}"
+        );
+    }
+    // IntegerArgumentType.integer(1, 65535): port 0 is low, 65536 big.
+    let e = server
+        .parse("transfer example.net 0", &at(3))
+        .executable()
+        .unwrap_err();
+    assert_eq!(e.message.plain(), "argument.integer.low");
+    let e = server
+        .parse("transfer example.net 65536", &at(3))
+        .executable()
+        .unwrap_err();
+    assert_eq!(e.message.plain(), "argument.integer.big");
 }
 /// The root literals a player at `level` is offered (the chat's, client tree).
 fn root_commands(d: &Dispatcher, level: u8) -> Vec<String> {
