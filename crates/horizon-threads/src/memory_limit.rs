@@ -130,6 +130,21 @@ fn pressure_of_faults(per_second: f64) -> Pressure {
     }
 }
 
+/// Against a hard ceiling, what the process commits is the budget: the working set sits at its
+/// cap whatever the game needs, and page faults only say how hard it pages, not how much it
+/// holds. A ceiling counts every page the process committed, the renderer's own included.
+pub fn pressure_of_commit(commit: u64, limit: u64) -> Pressure {
+    if commit > limit / 10 * 9 {
+        Pressure::Over {
+            keep: limit as f64 * 0.8 / commit as f64,
+        }
+    } else if commit < limit / 10 * 7 {
+        Pressure::Room
+    } else {
+        Pressure::Steady
+    }
+}
+
 /// How tight memory is under `limit`. Reads a difference since the last call: call it once a
 /// second, from one place.
 pub fn pressure(limit: u64) -> Pressure {
@@ -183,10 +198,20 @@ fn frozen(no_frame_for: Duration, faults_per_second: f64) -> bool {
 }
 
 fn check(state: &mut Over, faults: Option<f64>, limit: u64, exceeded: fn(u64, u64)) {
-    let Some(mut used) = resident_bytes() else {
+    // A hard ceiling counts what the process committed, the renderer's own
+    // pages included, since that is the number the player set.
+    let hard = crate::capped::limit().is_some();
+    let measured = if hard {
+        Some(crate::allocator_commit().0 as u64)
+    } else {
+        resident_bytes()
+    };
+    let Some(mut used) = measured else {
         return;
     };
-    if system_enforced() {
+    // A cap the system enforces can't be gone over, so there the sign is a game
+    // frozen by it. A hard ceiling can be gone over, and says so.
+    if system_enforced() && !hard {
         let no_frame_for = since_start().saturating_sub(LAST_FRAME.load(Ordering::Relaxed));
         if frozen(Duration::from_millis(no_frame_for), faults.unwrap_or(0.)) {
             // The report has to be written, which a frozen game can't do under the cap.
@@ -197,7 +222,11 @@ fn check(state: &mut Over, faults: Option<f64>, limit: u64, exceeded: fn(u64, u6
     }
     if used > limit {
         crate::release_free_memory();
-        used = resident_bytes().unwrap_or(used);
+        used = if hard {
+            crate::allocator_commit().0 as u64
+        } else {
+            resident_bytes().unwrap_or(used)
+        };
     }
     let can_shrink = since_start() < SHRINKS_UNTIL.load(Ordering::Relaxed);
     if state.gave_up(Instant::now(), used > limit, can_shrink) {
@@ -445,5 +474,33 @@ mod tests {
     fn saying_the_game_can_shrink_holds_the_last_resort_off_for_a_while() {
         can_shrink();
         assert!(since_start() < SHRINKS_UNTIL.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn a_commit_budget_says_over_near_it_and_room_far_below() {
+        assert_eq!(
+            pressure_of_commit(950, 1000),
+            Pressure::Over {
+                keep: 0.8 * 1000. / 950.
+            }
+        );
+        assert_eq!(pressure_of_commit(800, 1000), Pressure::Steady);
+        assert_eq!(pressure_of_commit(600, 1000), Pressure::Room);
+    }
+
+    #[test]
+    fn a_commit_budget_aims_for_less_the_further_over_it_is() {
+        let a = pressure_of_commit(1000, 1000);
+        let b = pressure_of_commit(2000, 1000);
+        let (Pressure::Over { keep: a }, Pressure::Over { keep: b }) = (a, b) else {
+            panic!("both are over");
+        };
+        assert!(a > b, "twice the budget asks for half as much");
+        assert!((b - 0.4).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_budget_of_zero_never_says_room() {
+        assert!(matches!(pressure_of_commit(1, 0), Pressure::Over { .. }));
     }
 }

@@ -235,7 +235,7 @@ enum InstanceCmd {
         /// latest-snapshot) instead of a Horizon one
         #[arg(long, conflicts_with = "copy")]
         minecraft: Option<String>,
-        /// With this mod loader: fabric or quilt
+        /// With this mod loader: fabric, quilt, forge or neoforge
         #[arg(long, requires = "minecraft")]
         loader: Option<String>,
         /// The loader's version (default: its newest stable one)
@@ -270,7 +270,7 @@ enum InstanceCmd {
         #[arg(long)]
         window: Option<String>,
     },
-    /// A Java instance's mod loader: fabric or quilt, or none. --list shows its versions
+    /// A Java instance's mod loader: fabric, quilt, forge or neoforge, or none. --list shows its versions
     Loader {
         instance: String,
         loader: String,

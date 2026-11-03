@@ -37,6 +37,10 @@ pub(super) struct ThrownTrident {
     pub(super) no_physics: bool,
     returning: u32,
     creative_only: bool,
+    /// `Entity.isNoGravity`: `AbstractArrow.applyGravity` then skips the pull.
+    pub(super) no_gravity: bool,
+    /// `Entity.tickCount`: `ProjectileUtil.computeMargin` grows with it.
+    age: u32,
     /// The entity id a server sent as its owner (the one Loyalty returns it to).
     pub(super) owner: u32,
     /// The guest that threw it (`Projectile.getOwner`); `None` for the host.
@@ -66,6 +70,7 @@ impl ThrownTrident {
         t.shake = n.shake;
         t.dealt_damage = n.dealt_damage;
         t.creative_only = n.creative_only;
+        t.no_gravity = n.no_gravity;
         t
     }
     /// `AbstractArrow.addAdditionalSaveData` + `DealtDamage`.
@@ -85,6 +90,7 @@ impl ThrownTrident {
                 shake: self.shake,
                 dealt_damage: self.dealt_damage,
                 creative_only: self.creative_only,
+                no_gravity: self.no_gravity,
                 item: &self.stack,
             },
             uuid,
@@ -109,6 +115,8 @@ impl ThrownTrident {
             no_physics: false,
             returning: 0,
             creative_only: false,
+            no_gravity: false,
+            age: 0,
             owner: 0,
             guest: None,
         }
@@ -175,7 +183,7 @@ impl ThrownTrident {
         self.position = to;
         // A trident's water inertia (0.99) equals the air drag.
         self.velocity = self.velocity.scale(0.99);
-        if !self.no_physics {
+        if !self.no_physics && !self.no_gravity {
             self.velocity.y -= 0.05;
         }
     }
@@ -426,6 +434,8 @@ impl Game<'_> {
             no_physics: false,
             returning: 0,
             creative_only: self.creative,
+            no_gravity: false,
+            age: 0,
             owner: 0,
             guest: self.lan_acting,
         });
@@ -537,6 +547,7 @@ impl Game<'_> {
         while i < self.tridents.len() {
             let mut t = self.tridents.remove(i);
             t.previous = t.position;
+            t.age += 1;
             // AbstractArrow.tick: `if (shakeTime > 0) --shakeTime;`.
             t.shake = t.shake.saturating_sub(1);
             if t.in_ground_time > 4 {
@@ -572,12 +583,28 @@ impl Game<'_> {
             } else {
                 // Mobs on the path, then blocks.
                 let mut hit_mob = None;
+                // ProjectileUtil.computeMargin: the boxes it meets grow from
+                // nothing to 0.3 over its first ticks.
+                let margin = f64::from(((t.age as i32 - 2) as f32 / 20.0).clamp(0.0, 0.3));
+                let grow = Vec3::new(margin, margin, margin);
                 if !t.dealt_damage {
                     for m in self.mobs.iter().filter(|m| m.alive()) {
-                        if let Some(d) = segment_box(t.position, t.velocity, m.bounds())
+                        if let Some(d) =
+                            segment_box(t.position, t.velocity, m.bounds().inflate(grow))
                             && hit_mob.is_none_or(|(_, best)| d < best)
                         {
                             hit_mob = Some((m.id, d));
+                        }
+                    }
+                }
+                // Boats and minecarts are pickable too (`VehicleEntity.isPickable`).
+                if !t.dealt_damage {
+                    for (who, b) in self.vehicle_targets() {
+                        if let Who::Mob(id) = who
+                            && let Some(d) = segment_box(t.position, t.velocity, b.inflate(grow))
+                            && hit_mob.is_none_or(|(_, best)| d < best)
+                        {
+                            hit_mob = Some((id, d));
                         }
                     }
                 }
@@ -594,14 +621,32 @@ impl Game<'_> {
                 });
                 if canceled_mob {
                     // No damage, sound or deflection: it flies on.
-                } else if let Some((id, _)) = hit_mob {
+                } else if let Some((id, d)) = hit_mob {
+                    // The trident stops where it met the box.
+                    t.position = Vec3::new(
+                        t.position.x + t.velocity.x * d,
+                        t.position.y + t.velocity.y * d,
+                        t.position.z + t.velocity.z * d,
+                    );
                     // ThrownTrident.getDamage: `EnchantmentHelper.modifyDamage` on 8
                     // (impaling hits `#sensitive_to_impaling`, the aquatic tag).
                     let victim = self
                         .mobs
                         .iter()
                         .find(|m| m.id == id)
-                        .map(|m| m.kind.id.clone());
+                        .map(|m| m.kind.id.clone())
+                        .or_else(|| {
+                            self.boats
+                                .iter()
+                                .find(|b| b.id == id)
+                                .map(|b| b.entity_type())
+                        })
+                        .or_else(|| {
+                            self.carts
+                                .iter()
+                                .find(|c| c.id == id)
+                                .map(|c| c.kind.id().to_owned())
+                        });
                     let ctx = EffectContext {
                         this: victim.as_deref(),
                         attacker: Some("minecraft:player"),
@@ -637,6 +682,14 @@ impl Game<'_> {
                             hurt_at = Some([m.position.x, m.position.y, m.position.z]);
                         }
                     }
+                    // ThrownTrident.onHitEntity on a boat or minecart:
+                    // VehicleEntity.hurtServer takes the damage.
+                    let creative = t.guest.is_none() && self.creative;
+                    if let Some(i) = self.boats.iter().position(|b| b.id == id) {
+                        self.hurt_boat(i, damage, creative);
+                    } else if let Some(i) = self.carts.iter().position(|c| c.id == id) {
+                        self.hurt_cart(i, damage, creative, false);
+                    }
                     // `minecraft:post_attack` of Channeling, on the victim.
                     if let Some(at) = hurt_at
                         && t.stack.enchantment_level("minecraft:channeling") > 0
@@ -667,11 +720,12 @@ impl Game<'_> {
                         1.0,
                         1.0,
                     );
-                    // ProjectileDeflection.REVERSE scaled by (0.02, 0.2, 0.02).
+                    // ProjectileDeflection.REVERSE (half, reversed) scaled by
+                    // (0.02, 0.2, 0.02).
                     t.velocity = Vec3::new(
-                        -t.velocity.x * 0.02,
-                        -t.velocity.y * 0.2,
-                        -t.velocity.z * 0.02,
+                        t.velocity.x * (-0.02 * 0.5),
+                        t.velocity.y * (-0.2 * 0.5),
+                        t.velocity.z * (-0.02 * 0.5),
                     );
                 } else {
                     // AbstractArrow.tick: a zero-width ray clip of the movement
@@ -731,11 +785,13 @@ impl Game<'_> {
                     }
                 }
                 if !t.in_ground {
-                    // A trident's water inertia (0.99) equals the air drag; gravity 0.05.
-                    let drag = 0.99;
+                    // A trident's water inertia (0.99) equals the air drag, a float in
+                    // vanilla (`AbstractArrow.tick`); gravity 0.05.
+                    let drag = f64::from(0.99f32);
+                    let gravity = if t.no_gravity { 0.0 } else { 0.05 };
                     t.velocity = Vec3::new(
                         t.velocity.x * drag,
-                        t.velocity.y * drag - 0.05,
+                        t.velocity.y * drag - gravity,
                         t.velocity.z * drag,
                     );
                     let h = (t.velocity.x * t.velocity.x + t.velocity.z * t.velocity.z).sqrt();

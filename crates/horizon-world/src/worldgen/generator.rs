@@ -809,6 +809,24 @@ pub struct ProtoChunk {
     pub entities: Vec<crate::nbt::Compound>,
 }
 impl ProtoChunk {
+    /// Its own heap bytes by part (`horizon-ctl memory`): packed blocks,
+    /// section palettes and lists, heightmaps, other terrain data, biomes,
+    /// and the box with its structure lists (the starts it shares not counted).
+    pub fn heap_bytes(&self) -> [usize; 6] {
+        let [storage, lists, heightmaps, other] = self.terrain.heap_bytes();
+        [
+            storage,
+            lists,
+            heightmaps,
+            other,
+            self.biomes.heap_bytes(),
+            std::mem::size_of::<Self>()
+                + self.block_entities.capacity()
+                    * std::mem::size_of::<([i32; 3], crate::nbt::Compound)>()
+                + self.structure_starts.capacity() * std::mem::size_of::<usize>()
+                + self.entities.capacity() * std::mem::size_of::<crate::nbt::Compound>(),
+        ]
+    }
     pub fn position(&self) -> ChunkPos {
         self.terrain.position()
     }
@@ -909,6 +927,8 @@ struct Pipeline<R: RandomSource> {
     carver_cache: Mutex<HashMap<(i32, i32), BiomeId>>,
     pub(super) decoration: Option<Arc<super::generator_decoration::Decoration>>,
     pub(super) structures: Option<super::generator_structures::StructureState>,
+    /// Definitions for explicit placement when automatic structure starts are off.
+    manual_structures: std::sync::OnceLock<Option<super::generator_structures::StructureState>>,
     /// The noise settings' `spawn_target` points.
     spawn_target: Vec<SpawnTargetPoint>,
     /// The chunks an older version generated, which new chunks blend with.
@@ -940,6 +960,18 @@ pub struct FlatSettings {
     pub structure_overrides: Option<Vec<String>>,
 }
 const CACHE_LIMIT: usize = 16384;
+/// What a generator's shared caches hold ([`OverworldGenerator::cache_census`]).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct CacheCensus {
+    /// Chunks in the biome cache, and their bytes.
+    pub biome_chunks: usize,
+    pub biome_bytes: usize,
+    /// Carver origins whose biome is cached.
+    pub carver_entries: usize,
+    /// Chunks in the structure start cache, and how many of them hold starts.
+    pub start_chunks: usize,
+    pub start_lists: usize,
+}
 /// Coordinates only equal missing neighbour keys. Weak entries retain no
 /// computed values across eviction or explicit invalidation. Only one work
 /// lock may be held at a time; finish shared prerequisites before acquiring it.
@@ -1191,6 +1223,7 @@ where
             carver_cache: Mutex::new(HashMap::new()),
             decoration: None,
             structures: None,
+            manual_structures: std::sync::OnceLock::new(),
             spawn_target,
             old_world: std::sync::OnceLock::new(),
             debug_density,
@@ -1213,8 +1246,55 @@ where
             if let Some(state) = pipeline.structures.as_mut() {
                 state.fixed_biome = generator["biome_source"]["type"] == "minecraft:fixed";
             }
+            // ChunkGenerator.createState reads getOrigin: a noise generator
+            // answers the chunk of its NoiseSpawnFinder position, others
+            // chunk 0 0. Only a dimension-origin structure set reads it.
+            if pipeline
+                .structures
+                .as_ref()
+                .is_some_and(|state| state.needs_dimension_origin())
+                && let Ok([x, z]) = pipeline.spawn_column()
+            {
+                let origin = ChunkPos::new(x >> 4, z >> 4);
+                if let Some(state) = pipeline.structures.as_mut() {
+                    state.set_dimension_origin(origin);
+                }
+            }
         }
         Ok(pipeline)
+    }
+    /// `NoiseBasedChunkGenerator.getOrigin`'s spawn column: the
+    /// NoiseSpawnFinder position, or 0 0 when the noise settings have no
+    /// spawn target (`ChunkGenerator.getOrigin`). Cached.
+    fn spawn_column(&self) -> Result<[i32; 2], GeneratorError> {
+        if let Some(position) = self.spawn_position.get() {
+            return Ok(*position);
+        }
+        // ChunkGenerator.getOrigin is 0 0 without a spawn target.
+        let position = if self.spawn_target.is_empty() {
+            [0, 0]
+        } else {
+            find_spawn_position(&self.spawn_target, &mut SamplerContext::cached())
+                .map_err(|e| GeneratorError::Stage("spawn search", e.to_string()))?
+        };
+        Ok(*self.spawn_position.get_or_init(|| position))
+    }
+    /// Manual placement reads the registry without enabling the automatic
+    /// structure state, its placement sets, starts or locate searches.
+    fn placement_structures(&self) -> Option<&super::generator_structures::StructureState> {
+        self.structures.as_ref().or_else(|| {
+            self.manual_structures
+                .get_or_init(|| {
+                    super::generator_structures::StructureState::new(
+                        &self.data,
+                        &BTreeSet::new(),
+                        Arc::new(std::sync::OnceLock::new()),
+                    )
+                    .ok()
+                    .flatten()
+                })
+                .as_ref()
+        })
     }
     fn generation(&self) -> WorldGenerationContext {
         // `new WorldGenerationContext(generator, level)`: the larger minimum Y and the smaller
@@ -2325,6 +2405,12 @@ trait SeededPipeline: Send + Sync {
         region: &mut [ProtoChunk; 9],
     ) -> Result<DecorateStats, GeneratorError>;
     fn data(&self) -> &Arc<GeneratorData>;
+    /// What the shared caches hold, for `horizon-ctl memory`.
+    fn cache_census(&self) -> CacheCensus {
+        CacheCensus::default()
+    }
+    /// Empty the caches that only spare work ([`OverworldGenerator::release_caches`]).
+    fn release_caches(&self) {}
     /// The exact `end_island_decorated` origins in a chunk, without terrain.
     fn end_island_origins(&self, chunk: ChunkPos) -> Vec<[i32; 3]>;
     fn sea_level(&self) -> i32;
@@ -2431,6 +2517,30 @@ where
     fn data(&self) -> &Arc<GeneratorData> {
         &self.data
     }
+    fn release_caches(&self) {
+        // Taken out under the lock, dropped after it.
+        let biomes = std::mem::take(&mut *self.biome_cache.lock().unwrap());
+        let carvers = std::mem::take(&mut *self.carver_cache.lock().unwrap());
+        drop((biomes, carvers));
+    }
+    fn cache_census(&self) -> CacheCensus {
+        let biomes = self.biome_cache.lock().unwrap();
+        let (start_chunks, start_lists) = self
+            .structures
+            .as_ref()
+            .map_or((0, 0), |s| s.start_census());
+        CacheCensus {
+            biome_chunks: biomes.len(),
+            biome_bytes: biomes
+                .values()
+                .map(|b| std::mem::size_of::<BiomeChunk<BiomeId>>() + b.heap_bytes())
+                .sum::<usize>()
+                + biomes.capacity() * std::mem::size_of::<((i32, i32), usize)>(),
+            carver_entries: self.carver_cache.lock().unwrap().len(),
+            start_chunks,
+            start_lists,
+        }
+    }
     fn end_island_origins(&self, chunk: ChunkPos) -> Vec<[i32; 3]> {
         let Some(decoration) = &self.decoration else {
             return Vec::new();
@@ -2476,8 +2586,7 @@ where
         structure: &str,
         chunk: ChunkPos,
     ) -> Option<Arc<super::structure::start::StructureStart>> {
-        self.structures
-            .as_ref()?
+        self.placement_structures()?
             .structure_start(
                 &mut StructureQueries {
                     pipeline: self,
@@ -2529,17 +2638,7 @@ where
         Box::new(self.region_random_at(center))
     }
     fn spawn_position(&self) -> Result<[i32; 2], GeneratorError> {
-        if let Some(position) = self.spawn_position.get() {
-            return Ok(*position);
-        }
-        // ChunkGenerator.getOrigin is 0 0 without a spawn target.
-        let position = if self.spawn_target.is_empty() {
-            [0, 0]
-        } else {
-            find_spawn_position(&self.spawn_target, &mut SamplerContext::cached())
-                .map_err(|e| GeneratorError::Stage("spawn search", e.to_string()))?
-        };
-        Ok(*self.spawn_position.get_or_init(|| position))
+        self.spawn_column()
     }
     fn locate(
         &self,
@@ -3057,7 +3156,7 @@ where
         // waterlogging applied. The pieces draw from the GenerationContext's
         // random, seeded from the level seed and the position's chunk, not
         // from the level random.
-        let structures = self.structures.as_ref()?;
+        let structures = self.placement_structures()?;
         let mut random = horizon_core::random::WorldgenRandom::new(LegacyRandom::new(0));
         random.set_large_feature_seed(self.seed, query.position[0] >> 4, query.position[2] >> 4);
         let aliases = BTreeMap::new();
@@ -3187,6 +3286,17 @@ pub struct OverworldGenerator {
     noise_clamped: Option<(NoiseSettings, NoiseSettings)>,
 }
 impl OverworldGenerator {
+    /// What the shared caches hold, for `horizon-ctl memory`.
+    pub fn cache_census(&self) -> CacheCensus {
+        self.pipeline.cache_census()
+    }
+    /// Empty the chunk biome and carver biome caches, while nothing generates:
+    /// they keep every chunk generated (up to 16384, 6 KB each) and only spare
+    /// computing a chunk's biomes again. The biomes come out the same: the
+    /// caches are emptied whole at their limit too.
+    pub fn release_caches(&self) {
+        self.pipeline.release_caches();
+    }
     /// The chunks an older version generated, which new chunks blend with
     /// (`Blender.of`); set once, before chunks are generated.
     pub fn set_old_world(&self, world: Arc<dyn super::blending::OldWorld>) {
@@ -4276,6 +4386,82 @@ mod tests {
         assert!(weak.upgrade().is_none());
         let next = work.at((0, 0));
         assert_eq!(Arc::strong_count(&next), 1);
+    }
+
+    /// Emptying the shared caches (every worker idle) changes no chunk: the
+    /// chunks generated after it have the same blocks and biomes.
+    #[test]
+    fn released_caches_generate_the_same_chunks() {
+        let root = std::env::var_os("HORIZON_RESOURCES")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| {
+                Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.local/horizon-client/26.3")
+            });
+        if !root.join("worldgen/world_presets.json").exists() {
+            eprintln!("skipping: no worldgen bundle at {}", root.display());
+            return;
+        }
+        let registry = Box::leak(Box::new(
+            crate::level::data::load_registry(&root).expect("registry"),
+        ));
+        let data = GeneratorData::load(&root.join("worldgen"), registry).expect("worldgen data");
+        let preset: Value = serde_json::from_str(&data.world_presets["minecraft:normal"]).unwrap();
+        let generator_json = &preset["dimensions"]["minecraft:overworld"]["generator"];
+        let settings: Value =
+            serde_json::from_str(&data.settings[generator_json["settings"].as_str().unwrap()])
+                .unwrap();
+        let generator = OverworldGenerator {
+            pipeline: Arc::new(
+                Pipeline::new(
+                    data,
+                    12345,
+                    XoroshiroRandom::new(12345),
+                    generator_json,
+                    &settings,
+                    true,
+                    Some((-64, 384)),
+                )
+                .expect("pipeline"),
+            ),
+            noise_clamped: None,
+        };
+        let contents = |chunk: &ProtoChunk| {
+            let (x0, z0) = (chunk.position().x * 16, chunk.position().z * 16);
+            let mut out = Vec::new();
+            for y in (-64..320).step_by(3) {
+                for z in 0..16 {
+                    for x in 0..16 {
+                        out.push(chunk.block(x0 + x, y, z0 + z).0);
+                        out.push(chunk.biome_id_at(x0 + x, y, z0 + z).0);
+                    }
+                }
+            }
+            out
+        };
+        let mut worker = generator.worker();
+        let chunks = [
+            ChunkPos::new(11, -11),
+            ChunkPos::new(12, -11),
+            ChunkPos::new(-3, 7),
+        ];
+        let before: Vec<_> = chunks
+            .iter()
+            .map(|&p| contents(&worker.generate_proto(p).unwrap()))
+            .collect();
+        assert!(generator.cache_census().biome_chunks > 0);
+        generator.release_caches();
+        worker.release();
+        let census = generator.cache_census();
+        assert_eq!((census.biome_chunks, census.carver_entries), (0, 0));
+        // The other way round, so a neighbour's biomes come from the cache
+        // where they were made before, and the reverse.
+        for (&p, before) in chunks.iter().zip(&before).rev() {
+            assert_eq!(
+                &contents(&worker.generate_proto(p).unwrap()),
+                before,
+                "chunk {p:?}"
+            );
+        }
     }
 
     /// Equal concurrent misses share one biome volume and the same mutable

@@ -178,13 +178,15 @@ impl Game<'_> {
             }
             Target::Crystal(id) => {
                 let c = self.crystals.iter().find(|c| c.id == id)?;
-                let (uuid, raw) = self.persist_anon("minecraft:end_crystal", c.position);
+                let raw = self.persist_anon("minecraft:end_crystal", c.position);
+                let uuid = self.persist.uuids.get(&id).copied();
                 let tag = c.to_nbt(uuid.unwrap_or_else(random_uuid), raw);
                 crate::game::persist::with_raw(tag, self.persist.raw.get(&id))
             }
             Target::Dragon(id) => {
                 let d = self.dragon.as_ref().filter(|d| d.id == id)?;
-                let (uuid, raw) = self.persist_anon("minecraft:ender_dragon", d.position);
+                let raw = self.persist_anon("minecraft:ender_dragon", d.position);
+                let uuid = self.persist.uuids.get(&id).copied();
                 let tag = d.to_nbt(uuid.unwrap_or_else(random_uuid), raw);
                 crate::game::persist::with_raw(tag, self.persist.raw.get(&id))
             }
@@ -223,6 +225,38 @@ impl Game<'_> {
                 let uuid = self.uuid_for(id);
                 let r = self.rockets.iter().find(|r| r.id == id)?;
                 r.to_nbt(uuid, player_uuid, self.persist.raw.get(&id))
+            }
+            Target::Cloud(id) => {
+                let uuid = self.uuid_for(id);
+                let c = self.breath_clouds.iter().find(|c| c.id == id)?;
+                let [x, y, z] = c.at;
+                // Read the live cloud, including its current radius and age;
+                // the raw compound alone does not contain generated clouds.
+                let mut tag = self.other_to_nbt(
+                    &super::OtherEntity {
+                        id,
+                        kind: "minecraft:area_effect_cloud".into(),
+                        position: horizon_core::geometry::Vec3::new(x, y, z),
+                        yaw: 0.0,
+                        pitch: 0.0,
+                    },
+                    uuid,
+                );
+                set_key(&mut tag, "Age", Tag::Int(c.age));
+                set_key(&mut tag, "Duration", Tag::Int(c.duration));
+                set_key(&mut tag, "Radius", Tag::Float(c.radius.to_bits()));
+                let wait = if c.potion.is_some() {
+                    crate::game::potions::LINGERING_WAIT
+                } else {
+                    20
+                };
+                set_key(&mut tag, "WaitTime", Tag::Int(wait));
+                tag
+            }
+            Target::Trident(id) => {
+                let uuid = self.uuid_for(id);
+                let t = self.tridents.iter().find(|t| t.id == id)?;
+                t.to_nbt(uuid, self.persist.raw.get(&id))
             }
             Target::Spawner(id) => {
                 let s = self.ominous_spawners.iter().find(|s| s.id == id)?;
@@ -266,6 +300,7 @@ impl Game<'_> {
                     // Runtime-only state (AI, animation) carries over.
                     let old = std::mem::replace(slot, new);
                     slot.ai = old.ai;
+                    slot.extra.armor_attributes = old.extra.armor_attributes;
                     slot.age = old.age;
                     slot.previous = slot.position;
                 }
@@ -330,18 +365,23 @@ impl Game<'_> {
             | Target::Projectile(id)
             | Target::Crystal(id)
             | Target::Dragon(id)
-            | Target::Other(id) => Some(self.persist.raw.entry(id).or_insert_with(empty)),
+            | Target::Other(id)
+            | Target::Cloud(id) => Some(self.persist.raw.entry(id).or_insert_with(empty)),
             _ => None,
         }
     }
-    fn set_entity_tags(&mut self, t: Target, tags: &[String]) {
-        if let Some(raw) = self.raw_mut(t) {
-            let list = tags
-                .iter()
-                .map(|s| Tag::String(s.as_str().into()))
-                .collect();
-            set_key(raw, "Tags", Tag::List(list));
-        }
+    /// Writes `t`'s `Tags`; false when its kind keeps no saved compound to
+    /// write them to.
+    pub(in crate::game) fn set_entity_tags(&mut self, t: Target, tags: &[String]) -> bool {
+        let Some(raw) = self.raw_mut(t) else {
+            return false;
+        };
+        let list = tags
+            .iter()
+            .map(|s| Tag::String(s.as_str().into()))
+            .collect();
+        set_key(raw, "Tags", Tag::List(list));
+        true
     }
 
     // ---- accessors -----------------------------------------------------
@@ -856,6 +896,8 @@ impl Game<'_> {
             Some(Target::Falling(id))
         } else if self.rockets.iter().any(|r| r.id == id) {
             Some(Target::Rocket(id))
+        } else if self.tridents.iter().any(|t| t.id == id) {
+            Some(Target::Trident(id))
         } else if self.ominous_spawners.iter().any(|s| s.id == id) {
             Some(Target::Spawner(id))
         } else {
@@ -863,7 +905,7 @@ impl Game<'_> {
         }
     }
     /// The `summon <entity> <pos> <nbt>` form.
-    pub(super) fn summon_with_nbt(
+    pub(in crate::game) fn summon_with_nbt(
         &mut self,
         kind: &str,
         pos: [f64; 3],

@@ -330,40 +330,73 @@ impl SoundRegistry {
     pub fn names(&self) -> impl Iterator<Item = &String> {
         self.events.keys()
     }
-    /// `Weighted.getWeight` of one entry.
-    fn entry_weight(&self, sound: &Sound, depth: u32) -> i32 {
+    /// `Weighted.getWeight` of one entry, with the sounds `refused` names left
+    /// out of every pool (the Music page's off tracks).
+    fn entry_weight(&self, sound: &Sound, depth: u32, refused: &dyn Fn(&str) -> bool) -> i32 {
         if !sound.event {
-            return sound.weight;
+            return if refused(&sound.location) {
+                0
+            } else {
+                sound.weight
+            };
         }
         if depth > 64 {
             return 0;
         }
         self.events
             .get(&sound.location)
-            .map_or(0, |e| self.total(e, depth + 1))
+            .map_or(0, |e| self.total(e, depth + 1, refused))
     }
-    fn total(&self, event: &WeighedSoundEvents, depth: u32) -> i32 {
-        event
-            .sounds
-            .iter()
-            .fold(0i32, |sum, s| sum.wrapping_add(self.entry_weight(s, depth)))
+    fn total(&self, event: &WeighedSoundEvents, depth: u32, refused: &dyn Fn(&str) -> bool) -> i32 {
+        event.sounds.iter().fold(0i32, |sum, s| {
+            sum.wrapping_add(self.entry_weight(s, depth, refused))
+        })
     }
     /// `WeighedSoundEvents.getWeight`.
     pub fn weight(&self, event: &str) -> i32 {
-        self.events.get(event).map_or(0, |e| self.total(e, 0))
+        self.events
+            .get(event)
+            .map_or(0, |e| self.total(e, 0, &|_| false))
     }
     /// `WeighedSoundEvents.getSound`: None when the event is not registered.
     pub fn sound(&self, event: &str, random: &mut impl RandomSource) -> Option<Sound> {
+        self.sound_except(event, random, &|_| false)
+    }
+    /// `WeighedSoundEvents.getSound` with the sounds `refused` names left out
+    /// of every pool: `Sound::empty()` when the event has nothing left to
+    /// play (all of its tracks are off).
+    pub fn sound_except(
+        &self,
+        event: &str,
+        random: &mut impl RandomSource,
+        refused: &dyn Fn(&str) -> bool,
+    ) -> Option<Sound> {
         let e = self.events.get(event)?;
-        Some(self.pick(e, random, 0))
+        Some(self.pick(e, random, 0, refused))
+    }
+    /// The sound files an event names itself, in `sounds.json` order: the
+    /// rows of the Music page. A `"type": "event"` reference is not followed
+    /// here: the event it names lists its own tracks.
+    pub fn tracks(&self, event: &str) -> Vec<String> {
+        let Some(e) = self.events.get(event) else {
+            return Vec::new();
+        };
+        let mut tracks: Vec<String> = Vec::new();
+        for sound in &e.sounds {
+            if !sound.event && !tracks.contains(&sound.location) {
+                tracks.push(sound.location.clone());
+            }
+        }
+        tracks
     }
     fn pick(
         &self,
         event: &WeighedSoundEvents,
         random: &mut impl RandomSource,
         depth: u32,
+        refused: &dyn Fn(&str) -> bool,
     ) -> Sound {
-        let weight = self.total(event, depth);
+        let weight = self.total(event, depth, refused);
         if event.sounds.is_empty() || weight == 0 {
             return Sound::empty();
         }
@@ -371,7 +404,7 @@ impl SoundRegistry {
             return Sound::empty();
         };
         for sound in &event.sounds {
-            index -= self.entry_weight(sound, depth);
+            index -= self.entry_weight(sound, depth, refused);
             if index < 0 {
                 if !sound.event {
                     return sound.clone();
@@ -384,7 +417,7 @@ impl SoundRegistry {
                 if depth > 64 {
                     return Sound::empty();
                 }
-                let wrapped = self.pick(inner, random, depth + 1);
+                let wrapped = self.pick(inner, random, depth + 1, refused);
                 return Sound {
                     location: wrapped.location,
                     volume: Sampled::Product(vec![wrapped.volume, sound.volume.clone()]),
@@ -460,5 +493,61 @@ mod tests {
         let mut random = LegacyRandom::new(1);
         assert_eq!(r.sound("minecraft:a", &mut random).unwrap(), Sound::empty());
         assert!(r.sound("minecraft:b", &mut random).is_none());
+    }
+
+    #[test]
+    fn tracks_are_the_files_an_event_names_and_no_references() {
+        let mut r = SoundRegistry::default();
+        r.add_file(
+            "minecraft",
+            br#"{
+                "music.game": {"sounds": ["music/a", "music/b", "music/a"]},
+                "music.creative": {"sounds": [{"name": "music.game", "type": "event"}, "music/c"]}
+            }"#,
+            &|_, _| true,
+        );
+        assert_eq!(
+            r.tracks("minecraft:music.game"),
+            ["minecraft:music/a", "minecraft:music/b"]
+        );
+        // The referenced event lists its own tracks; this one only "music/c".
+        assert_eq!(r.tracks("minecraft:music.creative"), ["minecraft:music/c"]);
+        assert!(r.tracks("minecraft:music.absent").is_empty());
+    }
+
+    #[test]
+    fn a_refused_sound_leaves_every_pool_it_is_in() {
+        let mut r = SoundRegistry::default();
+        r.add_file(
+            "minecraft",
+            br#"{
+                "inner": {"sounds": ["x", "y"]},
+                "outer": {"sounds": [{"name": "inner", "type": "event"}, "z"]}
+            }"#,
+            &|_, _| true,
+        );
+        let refused = |id: &str| id == "minecraft:x";
+        assert_eq!(r.weight("minecraft:outer"), 3);
+        let mut random = LegacyRandom::new(1);
+        let mut seen = std::collections::HashSet::new();
+        for _ in 0..256 {
+            let s = r
+                .sound_except("minecraft:outer", &mut random, &refused)
+                .unwrap();
+            assert_ne!(s.location, "minecraft:x");
+            seen.insert(s.location);
+        }
+        // The nested event still contributes its remaining track.
+        assert_eq!(
+            seen,
+            ["minecraft:y".to_owned(), "minecraft:z".to_owned()].into()
+        );
+        // Nothing left to play: the empty sound, not a missing one.
+        let none = |_: &str| true;
+        assert_eq!(
+            r.sound_except("minecraft:outer", &mut random, &none)
+                .unwrap(),
+            Sound::empty()
+        );
     }
 }
