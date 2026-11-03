@@ -1082,6 +1082,11 @@ pub fn mob_to_nbt(
             "CanBreakDoors".into(),
             Tag::Byte(i8::from(m.extra.can_break_doors)),
         );
+        // ConversionTracker.addAdditionalSaveData reads isAfflicted at save
+        // time. Zombie supplies its cached isEyeInFluid(WATER), even with NoAI.
+        if !m.fluids.eye_in_water {
+            map.insert("InWaterTime".into(), Tag::Int(-1));
+        }
     }
     if matches!(
         id,
@@ -1445,7 +1450,31 @@ pub fn mob_from_nbt(
                     )
                 }
                 "minecraft:max_health" => m.attrs.max_health = v as f32,
+                "minecraft:movement_speed"
+                    if crate::mobs::finalize::default_value(
+                        &m,
+                        crate::mobs::finalize::Attr::MovementSpeed,
+                    ) != Some(v) =>
+                {
+                    crate::mobs::finalize::set_base(
+                        &mut m,
+                        crate::mobs::finalize::Attr::MovementSpeed,
+                        v,
+                    )
+                }
                 "minecraft:movement_speed" => m.attrs.speed = v,
+                "minecraft:attack_damage"
+                    if crate::mobs::finalize::default_value(
+                        &m,
+                        crate::mobs::finalize::Attr::AttackDamage,
+                    ) != Some(v) =>
+                {
+                    crate::mobs::finalize::set_base(
+                        &mut m,
+                        crate::mobs::finalize::Attr::AttackDamage,
+                        v,
+                    )
+                }
                 "minecraft:attack_damage" => m.attrs.attack_damage = v as f32,
                 "minecraft:attack_knockback" => m.attrs.attack_knockback = v,
                 _ => {}
@@ -2425,8 +2454,7 @@ pub fn fireball_to_nbt(
 }
 
 /// `Projectile.addAdditionalSaveData`: Owner, LeftOwner only when set, and
-/// HasBeenShot once it has ticked (one saved before its first tick keeps
-/// what it was loaded with).
+/// the explicit HasBeenShot flag.
 fn put_projectile(tag: &mut Tag, p: &Projectile, owner: Option<[i32; 4]>) {
     if let Tag::Compound(map) = tag {
         map.remove(&"LeftOwner".into());
@@ -2438,9 +2466,7 @@ fn put_projectile(tag: &mut Tag, p: &Projectile, owner: Option<[i32; 4]>) {
     if p.no_gravity {
         put(tag, "NoGravity", Tag::Byte(1));
     }
-    if p.age > 0 || tag.get("HasBeenShot").is_none() {
-        put(tag, "HasBeenShot", Tag::Byte(i8::from(p.age > 0)));
-    }
+    put(tag, "HasBeenShot", Tag::Byte(i8::from(p.has_been_shot)));
     if let Some(owner) = owner {
         put(tag, "Owner", Tag::IntArray(owner.to_vec()));
     }
@@ -2569,6 +2595,7 @@ pub fn throwable_from_nbt(tag: &Tag, player: Option<[i32; 4]>) -> Option<Project
     p.velocity = motion(tag);
     [p.yaw, p.pitch] = rotation(tag);
     p.left_owner = flag(tag, "LeftOwner");
+    p.has_been_shot = flag(tag, "HasBeenShot");
     p.owner_uuid = owner;
     p.no_gravity = flag(tag, "NoGravity");
     Some(p)
@@ -2595,6 +2622,7 @@ pub fn spit_or_bullet_from_nbt(tag: &Tag, player: Option<[i32; 4]>) -> Option<Pr
     p.velocity = motion(tag);
     [p.yaw, p.pitch] = rotation(tag);
     p.left_owner = flag(tag, "LeftOwner");
+    p.has_been_shot = flag(tag, "HasBeenShot");
     p.owner_uuid = owner;
     p.no_gravity = flag(tag, "NoGravity");
     Some(p)
@@ -2648,6 +2676,7 @@ pub fn fireball_from_nbt(tag: &Tag, player: Option<[i32; 4]>) -> Option<Projecti
     p.velocity = motion(tag);
     [p.yaw, p.pitch] = rotation(tag);
     p.left_owner = flag(tag, "LeftOwner");
+    p.has_been_shot = flag(tag, "HasBeenShot");
     p.owner_uuid = owner;
     p.no_gravity = flag(tag, "NoGravity");
     p.acceleration = float(tag.get("acceleration_power")).unwrap_or(0.1);
@@ -4859,6 +4888,8 @@ mod sheep_nbt_tests {
         // tags, -1 for a counter that is not running, and both come back into
         // the counters the tick uses.
         let mut zombie = new("minecraft:zombie");
+        // Positive affliction counters represent a zombie with immersed eyes.
+        zombie.fluids.eye_in_water = true;
         zombie.extra.counter = 300;
         let (back, tag) = round_trip(&zombie);
         assert_eq!(number(tag.get("InWaterTime")), Some(300));
@@ -5359,6 +5390,37 @@ mod fireball_nbt_tests {
     }
 
     #[test]
+    fn projectile_shot_flag_round_trips_independently_of_age() {
+        for id in [
+            "minecraft:snowball",
+            "minecraft:fireball",
+            "minecraft:llama_spit",
+            "minecraft:shulker_bullet",
+        ] {
+            for shot in [0, 1] {
+                let raw = Tag::compound([
+                    ("id", Tag::String(id.into())),
+                    ("Pos", doubles(&[1.0, 70.0, 2.0])),
+                    ("HasBeenShot", Tag::Byte(shot)),
+                ]);
+                let mut p = throwable_from_nbt(&raw, None)
+                    .or_else(|| fireball_from_nbt(&raw, None))
+                    .or_else(|| spit_or_bullet_from_nbt(&raw, None))
+                    .unwrap();
+                assert_eq!(p.has_been_shot, shot != 0);
+                for age in [0, 12] {
+                    p.age = age;
+                    let tag = throwable_to_nbt(&p, [1, 2, 3, 4], None, Some(&raw))
+                        .or_else(|| fireball_to_nbt(&p, [1, 2, 3, 4], None, Some(&raw)))
+                        .or_else(|| spit_or_bullet_to_nbt(&p, [1, 2, 3, 4], None, Some(&raw)))
+                        .unwrap();
+                    assert_eq!(number(tag.get("HasBeenShot")), Some(i64::from(shot)));
+                }
+            }
+        }
+    }
+
+    #[test]
     fn thrown_item_projectiles_round_trip_their_flight_item_and_owner() {
         let player = Some([5, 6, 7, 8]);
         for (kind, id) in [
@@ -5369,6 +5431,7 @@ mod fireball_nbt_tests {
             let mut p =
                 Projectile::new(kind.clone(), Vec3::new(1.5, 70.0, -2.5), Some(Who::Player));
             (p.velocity, p.left_owner, p.age) = (Vec3::new(0.3, -0.1, 1.2), true, 4);
+            p.has_been_shot = true;
             [p.yaw, p.pitch] = [30.0, -10.0];
             let tag = throwable_to_nbt(&p, [1, 2, 3, 4], player, None).unwrap();
             assert_eq!(super::kind(&tag).as_deref(), Some(id));

@@ -3607,6 +3607,17 @@ impl Game<'_> {
                             (0, Value::Byte(flags)) => {
                                 if let Some(pl) = self.player.as_mut() {
                                     pl.sprinting = flags & 0x08 != 0;
+                                    // Entity.DATA_SHARED_FLAGS_ID's fall-flying
+                                    // bit (0x80, `Entity.setSharedFlag(7, ...)`):
+                                    // `LivingEntity.updateFallFlying` clears the
+                                    // glide on the server only and `LocalPlayer`
+                                    // never ends one itself, so this packet is
+                                    // the glide's own end. Applied when it is
+                                    // handled — the frame's poll, before its
+                                    // ticks — as ClientPacketListener does, so a
+                                    // clear that arrives mid-tick lets that tick
+                                    // keep its glide travel (#7616).
+                                    pl.fall_flying = flags & -128 != 0;
                                 }
                                 if let Some(r) = self.remote.as_mut() {
                                     r.own_invisible = flags & 0x20 != 0;

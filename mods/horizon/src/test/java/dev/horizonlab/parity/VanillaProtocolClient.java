@@ -116,6 +116,7 @@ public final class VanillaProtocolClient {
     private String state;
     /** With a fifth argument {@code entities}: the entity transcript mode (EntityTranscript). */
     private EntityTranscript entities;
+    private GoatVoiceTranscript goatVoices;
 
     public static void main(String[] args) throws Exception {
         ParityData.init();
@@ -125,6 +126,10 @@ public final class VanillaProtocolClient {
         Path output = Path.of(args[3]);
         VanillaProtocolClient client = new VanillaProtocolClient();
         if (args.length > 4 && args[4].equals("entities")) client.entities = new EntityTranscript();
+        if (args.length > 4 && args[4].equals("goat-voices")) {
+            client.entities = new EntityTranscript();
+            client.goatVoices = new GoatVoiceTranscript();
+        }
         try {
             client.status(host, port);
             client.join(host, port, name);
@@ -452,7 +457,7 @@ public final class VanillaProtocolClient {
         boolean loaded = false;
         PositionMoveRotation position = new PositionMoveRotation(Vec3.ZERO, Vec3.ZERO, 0, 0);
         long lastChunk = 0;
-        long deadline = System.currentTimeMillis() + 150_000;
+        long deadline = System.currentTimeMillis() + (goatVoices == null ? 150_000 : 600_000);
         int step = 0;
         long stepAt = 0;
         // The death the console deals and the respawn after it (PlayerList.respawn): from the
@@ -510,6 +515,7 @@ public final class VanillaProtocolClient {
                 Packet<?> packet = r.packet;
                 counts.merge(r.type, 1, Integer::sum);
                 if (entities != null && !entities.acceptSelf(packet) && step >= ENTITIES) entities.accept(packet);
+                if (goatVoices != null) goatVoices.accept(packet);
                 if (r.type.equals("minecraft:chunk_batch_start")) ordered = false;
                 if (respawning && !respawned) {
                     String line = respawnLine(r, playerId);
@@ -671,13 +677,19 @@ public final class VanillaProtocolClient {
                 // Entity mode: the harness's console summons the scene once it reads this
                 // line; everything tracked from then on is recorded until the client leaves.
                 record("play-chunks", String.valueOf(chunks.size()));
-                send(new ServerboundChatPacket("summon the entities", Instant.now(), 0L, Optional.empty(),
+                send(new ServerboundChatPacket(goatVoices == null ? "summon the entities" : "summon the goats", Instant.now(), 0L, Optional.empty(),
                     new LastSeenMessages.Update(0, new BitSet(), (byte) 0)));
                 step = ENTITIES;
                 stepAt = now;
-            } else if (step == ENTITIES && now - stepAt > ENTITY_WAIT) {
-                for (String line : entities.lines()) record("play-entities", line);
+            } else if (step == ENTITIES && (goatVoices == null ? now - stepAt > ENTITY_WAIT : goatVoices.done())) {
+                if (goatVoices == null) for (String line : entities.lines()) record("play-entities", line);
+                else for (String line : goatVoices.lines()) record("play-goat-voice", line);
                 return;
+            }
+            if (goatVoices != null) {
+                String ack = goatVoices.acknowledgement();
+                if (ack != null) send(new ServerboundChatPacket(ack, Instant.now(), 0L, Optional.empty(),
+                    new LastSeenMessages.Update(0, new BitSet(), (byte) 0)));
             }
             // Once the chunks stop coming: chat, then /list, then leave.
             if (entities == null && loaded && lastChunk > 0 && now - lastChunk > 3000 && step == 0) {

@@ -1532,10 +1532,14 @@ impl Game<'_> {
             .or_else(|| entity_nbt::fireball_to_nbt(p, uuid, owner, raw.as_ref()))
             .or_else(|| entity_nbt::throwable_to_nbt(p, uuid, owner, raw.as_ref()))
             .or_else(|| entity_nbt::spit_or_bullet_to_nbt(p, uuid, owner, raw.as_ref()))?;
-        Some((
-            chunk_of(p.position),
-            with_raw(tag, self.persist.raw.get(&p.id)),
-        ))
+        // HasBeenShot is modeled for these projectiles. The generic raw
+        // overlay also serves entity types whose shot flag is still opaque.
+        let shot = tag.get("HasBeenShot").cloned();
+        let mut tag = with_raw(tag, self.persist.raw.get(&p.id));
+        if let (Some(shot), Tag::Compound(map)) = (shot, &mut tag) {
+            map.insert("HasBeenShot".into(), shot);
+        }
+        Some((chunk_of(p.position), tag))
     }
     pub(super) fn save_falling(
         &mut self,

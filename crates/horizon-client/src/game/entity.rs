@@ -59,6 +59,8 @@ pub(super) trait Entity: EntityRules {
     fn id(&self) -> u32;
     fn position(&self) -> Vec3;
     fn position_mut(&mut self) -> &mut Vec3;
+    /// `Entity.getDeltaMovement`.
+    fn velocity(&self) -> Vec3;
     fn velocity_mut(&mut self) -> &mut Vec3;
     fn bounds(&self) -> Aabb;
     /// What a selector finds this entity as (`@e`), or `None` for one it cannot
@@ -251,6 +253,9 @@ macro_rules! stored_motion {
         }
         fn position_mut(&mut self) -> &mut Vec3 {
             &mut self.position
+        }
+        fn velocity(&self) -> Vec3 {
+            self.velocity
         }
         fn velocity_mut(&mut self) -> &mut Vec3 {
             &mut self.velocity

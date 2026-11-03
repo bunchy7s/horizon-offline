@@ -201,21 +201,14 @@ impl Game<'_> {
             let lure = stack.enchantment_level("minecraft:lure") as i32 * 5 * 20;
             let luck = stack.enchantment_level("minecraft:luck_of_the_sea") as i32;
             let (yaw, pitch) = (self.yaw, self.pitch);
-            let y_cos = (-yaw.to_radians() - std::f32::consts::PI).cos();
-            let y_sin = (-yaw.to_radians() - std::f32::consts::PI).sin();
-            let x_cos = -(-pitch.to_radians()).cos();
-            let x_sin = (-pitch.to_radians()).sin();
+            let (y_sin, y_cos, dir_y) = cast_direction(yaw, pitch);
             let eye_y = p.position.y + f64::from(p.dimensions.eye_height);
             let start = Vec3::new(
                 p.position.x - f64::from(y_sin) * 0.3,
                 eye_y,
                 p.position.z - f64::from(y_cos) * 0.3,
             );
-            let mut v = Vec3::new(
-                f64::from(-y_sin),
-                f64::from((-(x_sin / x_cos)).clamp(-5.0, 5.0)),
-                f64::from(-y_cos),
-            );
+            let mut v = Vec3::new(f64::from(-y_sin), f64::from(dir_y), f64::from(-y_cos));
             let len = (v.x * v.x + v.y * v.y + v.z * v.z).sqrt();
             let r = &mut self.world.random;
             v = Vec3::new(
@@ -1472,11 +1465,42 @@ impl Game<'_> {
     }
 }
 
+/// `FishingHook(Player, Level, int, int)`: `(ySin, yCos, y)` of the cast direction, using
+/// `Mth.sin`/`Mth.cos` (the 65536-entry table), so straight down gives `xCos == -0.0`, y `-5`.
+fn cast_direction(yaw: f32, pitch: f32) -> (f32, f32, f32) {
+    let ya = f64::from(-yaw * trig::DEG_TO_RAD - std::f32::consts::PI);
+    let pa = f64::from(-pitch * trig::DEG_TO_RAD);
+    let (y_sin, y_cos) = (trig::sin(ya), trig::cos(ya));
+    let (x_cos, x_sin) = (-trig::cos(pa), trig::sin(pa));
+    (y_sin, y_cos, (-(x_sin / x_cos)).clamp(-5.0, 5.0))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{entity_hit_margin, first_entity_hit, pull_item, rebound};
+    use super::{cast_direction, entity_hit_margin, first_entity_hit, pull_item, rebound};
     use horizon_client::{entities::ItemEntity, items::ItemStack};
     use horizon_core::geometry::{Aabb, Vec3};
+
+    #[test]
+    fn casting_straight_down_aims_down_and_straight_up_aims_up() {
+        assert_eq!(cast_direction(0.0, 90.0).2, -5.0);
+        assert_eq!(cast_direction(123.0, 89.9).2, -5.0);
+        assert_eq!(cast_direction(0.0, -90.0).2, 5.0);
+        assert_eq!(cast_direction(0.0, 0.0).2, 0.0);
+    }
+
+    #[test]
+    fn cast_direction_uses_the_vanilla_sine_table() {
+        // pitch 45: y = -(sin(-a) / -cos(-a)) with table entries built independently.
+        let a = f64::from(-45.0_f32 * std::f32::consts::PI / 180.0);
+        let table = |i: i64| ((i & 65535) as f64 / 10430.378350470453).sin() as f32;
+        let (s, c) = (
+            table((a * 10430.378350470453) as i64),
+            -table((a * 10430.378350470453 + 16384.0) as i64),
+        );
+        let (_, _, y) = cast_direction(0.0, 45.0);
+        assert!((y - (-(s / c))).abs() < 1e-3, "{y}");
+    }
 
     /// `HitResult.distanceTo` is squared: a hit 0.5 away rebounds at 0.25.
     #[test]
