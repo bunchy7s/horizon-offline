@@ -1,3 +1,5 @@
+AbstractFish.addAdditionalSaveData	inline	crates/horizon-client/src/entity_nbt.rs::mob_to_nbt	FromBucket always written; tadpole getter is always true
+AbstractFish.readAdditionalSaveData	inline	crates/horizon-client/src/entity_nbt.rs::mob_from_nbt	FromBucket via read_variant defaults false; tadpole ignores loaded input
 AgeableWaterCreature.handleAirSupply	inline	crates/horizon-client/src/mobs/ai.rs::base_tick	the needs_water branch of base_tick; dolphins override it to nothing and refill air in aquatic.rs
 AgeableWaterCreature.checkSurfaceAgeableWaterCreatureSpawnRules	port	crates/horizon-client/src/mobs/spawn_rules.rs::surface_water	
 Animal.readAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob_from_nbt	InLove is read; LoveCause is not kept
@@ -39,8 +41,8 @@ ArmadilloAi.initIdleActivity	inline	crates/horizon-client/src/mobs/armadillo.rs:
 ArmadilloAi.initScaredActivity	inline	crates/horizon-client/src/mobs/armadillo.rs::server_ai_step	the PANIC activity and ArmadilloBallUp
 Axolotl.<init>	port	crates/horizon-client/src/mobs/aquatic.rs::register	the Axolotl arm: smooth swimming move and look control, amphibious navigation, water malus 0
 Axolotl.defineSynchedData	port	crates/horizon-client/src/game/lan.rs::mob_meta	variant and playing_dead; from_bucket is not synced
-Axolotl.addAdditionalSaveData	inline	crates/horizon-client/src/entity_nbt.rs::mob_to_nbt	Variant is written; FromBucket is not
-Axolotl.readAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::read_variant	Variant is read; FromBucket is not
+Axolotl.addAdditionalSaveData	inline	crates/horizon-client/src/entity_nbt.rs::mob_to_nbt	Variant and FromBucket are written
+Axolotl.readAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::read_variant	Variant and FromBucket are read
 Axolotl.finalizeSpawn	port	crates/horizon-client/src/mobs/finalize.rs::Ctx::finalize	group variants and baby age
 Axolotl.tickBabyAnimations	inline	crates/horizon-client/src/mobs/axolotl.rs::Animation::tick	the baby branch
 Axolotl.soloAnimation	inline	crates/horizon-client/src/mobs/axolotl.rs::Animation::tick	one state started, the rest stopped
@@ -109,6 +111,8 @@ CamelAi.initCoreActivity	inline	crates/horizon-client/src/mobs/camel.rs::registe
 CamelAi.initIdleActivity	inline	crates/horizon-client/src/mobs/camel.rs::register	breed, tempt, follow parent, stroll, random sitting, look
 CamelAi.CamelPanic.checkExtraStartConditions	port	crates/horizon-client/src/mobs/camel.rs::CamelPanic::can_use	
 CamelAi.RandomSitting.checkExtraStartConditions	port	crates/horizon-client/src/mobs/camel.rs::RandomSitting::can_use	gap: no leash or suffocation (canCamelChangePose) check
+Chicken.isFlapping	port	crates/horizon-client/src/mobs/farm.rs::chicken_process_flapping	strict flyDist > nextFlap, used by air movement and live Game flap dispatch
+Chicken.onFlap	port	crates/horizon-client/src/mobs/farm.rs::chicken_process_flapping	nextFlap = flyDist + flapSpeed / 2, no sound
 Chicken.registerGoals	port	crates/horizon-client/src/mobs/farm.rs::register	
 Chicken.getSoundSet	inline	crates/horizon-client/src/mobs/ai.rs::voice_sounds	gap: baby sets only; the picky sound variant is stored but never used
 Chicken.getBreedOffspring	port	crates/horizon-client/src/game/creatures.rs::Game::breed	gap: baby copies the first parent's variant, no random parent
@@ -141,3 +145,4 @@ MushroomCow.get	port	crates/horizon-client/src/mobs/finalize.rs::species_variant
 MushroomCow.applyImplicitComponent	port	crates/horizon-client/src/entity_nbt.rs::apply_item_components	an egg's mooshroom/variant sets the colour
 MushroomCow.getBreedOffspring	port	crates/horizon-client/src/game/creatures.rs::Game::breed	see getOffspringVariant
 MushroomCow.getOffspringVariant	port	crates/horizon-client/src/game/creatures.rs::breed	ticked in #3512; `MushroomCow.getOffspringVariant` is cited at crates/horizon-client/src/game/creatures.rs:2566 (in a comment, so `where` names the enclosing fn)
+Tadpole.fromBucket	inline	crates/horizon-client/src/entity_nbt.rs::mob_to_nbt	saved FromBucket is always true

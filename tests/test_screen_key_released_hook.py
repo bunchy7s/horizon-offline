@@ -51,8 +51,8 @@ impl Game {
         assert_eq!((*screen, name, modifiers), ("options", "key.keyboard.a", 5));
         self.calls.set(self.calls.get() + 1); *canceled = self.cancel;
     }
-    fn mapped_key(&mut self, key: i32, pressed: bool, repeat: bool) -> Result<()> {
-        assert!(!pressed && !repeat); self.released.push((false, key)); Ok(())
+    fn mapped_key(&mut self, key: i32, pressed: bool, repeat: bool, raw: i32) -> Result<()> {
+        assert!(!pressed && !repeat && raw == 1); self.released.push((false, key)); Ok(())
     }
     fn play_mouse(&mut self, button: i32, pressed: bool) -> Result<()> {
         assert!(!pressed); self.released.push((true, button)); Ok(())

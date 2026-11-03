@@ -31,7 +31,7 @@ Wolf.addAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob_to_
 Wolf.readAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob_from_nbt	CollarColor, sound_variant and anger read
 Wolf.finalizeSpawn	port	crates/horizon-client/src/mobs/finalize.rs::Ctx::finalize	gap: minor: sound variant is stored but no sound uses it (see getSoundSet)
 Wolf.getAmbientSound	port	crates/horizon-client/src/mobs/ai.rs::ambient_sound	gap: minor: angry is taken as having a target, not the anger timer
-Wolf.die	missing		minor: a wolf that dies mid-shake keeps its shake state; Horizon never resets the wet and shake fields on death
+Wolf.die	port	crates/horizon-client/src/mobs/tame.rs::die	`drops::die` asks it first: isWet/isShaking and both shake animations are cleared
 Wolf.getHeadRollAngle	port	crates/horizon-client/src/mobs/tame.rs::anim	
 Wolf.applyTamingSideEffects	port	crates/horizon-client/src/mobs/tame.rs::set_tame	
 Wolf.hurtArmor	port	crates/horizon-client/src/mobs.rs::Mob::hurt_wolf_armor	

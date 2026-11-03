@@ -193,6 +193,8 @@ pub struct ItemInfo {
     pub disable_blocking_seconds: f32,
     /// `weapon.item_damage_per_attack`, when the item is a weapon.
     pub weapon_damage: Option<u32>,
+    /// `villager_food.nutrition`: what a villager gets from eating it.
+    pub villager_food: Option<i32>,
     /// `use_effects.speed_multiplier` (UseEffects.DEFAULT: 0.2).
     pub use_speed: f32,
     /// `use_effects.can_sprint` (default false): sprinting may start while the
@@ -362,6 +364,14 @@ fn registry_order(root: &Path, order: &[Arc<str>]) -> Vec<Arc<str>> {
 }
 /// Item ids standing for a loot table's `minecraft:dynamic` entries.
 const DYNAMIC: &str = "#dynamic:";
+/// The item id standing for a chosen `minecraft:loot_table` entry, whose
+/// table then rolls in full (`NestedLootTable`).
+const NESTED: &str = "#loot_table";
+thread_local! {
+    /// The nested tables rolling now, outermost first: a table never rolls
+    /// inside itself (`LootContext.pushVisitedElement`).
+    static NESTED_ROLLS: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
+}
 pub struct Items {
     pub items: HashMap<Arc<str>, ItemInfo>,
     pub order: Vec<Arc<str>>,
@@ -590,6 +600,31 @@ fn entity_spec(tags: &HashMap<String, HashSet<String>>, spec: &str) -> HashSet<S
         None => HashSet::from([spec.to_owned()]),
     }
 }
+/// Every item of the last item registry loaded with its `villager_food`
+/// nutrition (0 without the component): what the mobs' villagers read, since
+/// a mob does not hold the registry (`None` until one is loaded).
+static VILLAGER_FOOD: std::sync::RwLock<Option<HashMap<Arc<str>, i32>>> =
+    std::sync::RwLock::new(None);
+fn set_villager_food(items: &HashMap<Arc<str>, ItemInfo>) {
+    let food = items
+        .values()
+        .map(|i| (i.id.clone(), i.villager_food.unwrap_or(0)))
+        .collect();
+    *VILLAGER_FOOD
+        .write()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(food);
+}
+/// `item`'s `villager_food` nutrition (`DataComponents.VILLAGER_FOOD`): its
+/// value in the loaded registry (0 for an item without the component), or
+/// `None` while no registry is loaded or the loaded one lacks the item (a
+/// test's content root without the vanilla items).
+pub fn villager_food(item: &str) -> Option<i32> {
+    let food = VILLAGER_FOOD
+        .read()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    food.as_ref().and_then(|f| f.get(item).copied())
+}
+
 impl Items {
     pub fn resists_fire(&self, stack: &ItemStack, source: &str) -> bool {
         if let Some(data) = stack.data()
@@ -828,6 +863,9 @@ impl Items {
                         .find(|(item, _)| *item == name)
                         .map(|(_, rest)| (*rest).to_owned())
                         .or_else(|| mod_remainders.get(name).cloned()),
+                    villager_food: c["minecraft:villager_food"]["nutrition"]
+                        .as_i64()
+                        .map(|n| n as i32),
                     use_speed: c["minecraft:use_effects"]["speed_multiplier"]
                         .as_f64()
                         .unwrap_or(0.2) as f32,
@@ -890,6 +928,7 @@ impl Items {
         // game's own: one map with the loot data of the same root and packs.
         let loot = horizon_world::loot::shared_tables(root, overlay)?;
         let registry_order = registry_order(root, &order);
+        set_villager_food(&items);
         Ok(Self {
             items,
             order,
@@ -1231,7 +1270,11 @@ impl Items {
             explosion_radius: None,
             this_entity: false,
         };
-        ctx.evaluate(table, random)
+        // LootTable.getRandomItemsRaw visits the table itself first.
+        NESTED_ROLLS.with(|v| v.borrow_mut().push(id.to_owned()));
+        let out = ctx.evaluate(table, random);
+        NESTED_ROLLS.with(|v| v.borrow_mut().pop());
+        out
     }
     /// The server random sequence a loot table draws from (`random_sequence`):
     /// vanilla's `LootContext.Builder.create` uses it instead of the level random.
@@ -1646,6 +1689,21 @@ impl LootContext<'_> {
                 ));
                 true
             }
+            // NestedLootTable: chosen by its weight like an item; `choose`
+            // then rolls its table (an id or inline) and applies its functions.
+            "minecraft:loot_table" => {
+                out.push((
+                    e["weight"].as_i64().unwrap_or(1) as i32,
+                    ItemStack {
+                        item: Arc::from(NESTED),
+                        count: 1,
+                        damage: 0,
+                        extra: None,
+                    },
+                    e.clone(),
+                ));
+                true
+            }
             "minecraft:empty" => {
                 out.push((
                     e["weight"].as_i64().unwrap_or(1) as i32,
@@ -1691,8 +1749,45 @@ impl LootContext<'_> {
             chosen
         };
         let (_, mut stack, modifiers) = candidates.swap_remove(pick);
+        if &*stack.item == NESTED {
+            self.nested(&modifiers, random, produced);
+            return;
+        }
         self.modifiers(&modifiers, &mut stack, random);
         produced.push(stack);
+    }
+    /// `NestedLootTable.createItemStack`: the entry's table rolls in full
+    /// (its pools and its own functions), then the entry's functions apply to
+    /// each stack. A table already rolling further out adds nothing.
+    fn nested<R: RandomSource>(
+        &self,
+        entry: &Value,
+        random: &mut R,
+        produced: &mut Vec<ItemStack>,
+    ) {
+        let (name, table) = match &entry["value"] {
+            Value::String(name) => (name.as_str(), self.items.loot.get(name.as_str())),
+            inline @ Value::Object(_) => ("<inline>", Some(inline)),
+            _ => return,
+        };
+        let Some(table) = table else { return };
+        let entered = NESTED_ROLLS.with(|v| {
+            let mut v = v.borrow_mut();
+            let fresh = !v.iter().any(|n| n == name);
+            if fresh {
+                v.push(name.to_owned());
+            }
+            fresh
+        });
+        if !entered {
+            return;
+        }
+        let stacks = self.evaluate(table, random);
+        NESTED_ROLLS.with(|v| v.borrow_mut().pop());
+        for mut stack in stacks {
+            self.modifiers(&entry["modifier"], &mut stack, random);
+            produced.push(stack);
+        }
     }
     /// An enchantment function's `options` (`HolderSet`): a tag, a list or
     /// one id; every enchantment when absent (`registryAccess().listElements`).
@@ -1723,6 +1818,37 @@ impl LootContext<'_> {
                         0
                     };
                     stack.count = (base + n).max(0) as u32;
+                }
+                // SetItemDamageFunction.run: check damageability before the
+                // float provider, so ineligible stacks do not draw randomness.
+                "minecraft:set_damage" => {
+                    let component = |id| stack.data().and_then(|data| data.other(id));
+                    if stack.count == 0
+                        || component("minecraft:unbreakable").is_some()
+                        || component("!minecraft:max_damage").is_some()
+                        || component("!minecraft:damage").is_some()
+                    {
+                        continue;
+                    }
+                    let max = match component("minecraft:max_damage") {
+                        Some(horizon_world::nbt::Tag::Int(value)) => {
+                            u32::try_from(*value).unwrap_or(0)
+                        }
+                        _ => self
+                            .items
+                            .get(&stack.item)
+                            .map_or(0, |info| info.max_damage),
+                    };
+                    if max == 0 {
+                        continue;
+                    }
+                    let base = if f["add"].as_bool() == Some(true) {
+                        1.0 - stack.damage as f32 / max as f32
+                    } else {
+                        0.0
+                    };
+                    let remaining = (Self::number(&f["damage"], random) + base).clamp(0.0, 1.0);
+                    stack.damage = ((1.0 - remaining) * max as f32).floor() as u32;
                 }
                 "minecraft:apply_bonus" => {
                     let level =
@@ -2206,6 +2332,40 @@ mod tests {
         assert!(!items.item_in_tag("test:missing", "test:apple"));
     }
 
+    /// `NestedLootTable`: a `loot_table` entry, by id or inline, rolls that
+    /// table in full and applies its own functions to each stack; a table
+    /// never rolls inside itself.
+    #[test]
+    fn loot_table_entries_roll_their_table() {
+        let mut items = Items::for_tests(HashMap::new());
+        let diamond = json!({"pools":[{"rolls":1,"entries":[{"type":"minecraft:item","name":"minecraft:diamond"}]}]});
+        items.loot = Arc::new(
+            [
+                ("test:inner", diamond.clone()),
+                ("test:outer", json!({"pools":[{"rolls":1,"entries":[{"type":"minecraft:loot_table",
+                    "value":"test:inner","modifier":[{"type":"minecraft:set_count","count":3}]}]}]})),
+                ("test:inline", json!({"pools":[{"rolls":1,"entries":[{"type":"minecraft:loot_table",
+                    "value":diamond}]}]})),
+                ("test:loop", json!({"pools":[{"rolls":1,"entries":[{"type":"minecraft:loot_table",
+                    "value":"test:loop"}]},{"rolls":1,"entries":[{"type":"minecraft:item","name":"minecraft:stick"}]}]})),
+            ]
+            .map(|(id, t)| (id.to_owned(), t))
+            .into_iter()
+            .collect(),
+        );
+        let roll = |id: &str| {
+            items
+                .loot_table(id, false, None, &mut LegacyRandom::new(1))
+                .into_iter()
+                .map(|s| format!("{} {}", s.item, s.count))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(roll("test:outer"), ["minecraft:diamond 3"]);
+        assert_eq!(roll("test:inline"), ["minecraft:diamond 1"]);
+        // `test:loop` is already rolling: its own entry adds nothing.
+        assert_eq!(roll("test:loop"), ["minecraft:stick 1"]);
+    }
+
     /// `Blocks.wallVariant`: a wall block without a table of its own drops
     /// from its standing block's (vanilla's tables: `blocks/torch` for
     /// `wall_torch`, `blocks/oak_sign` for `oak_wall_sign`...).
@@ -2661,5 +2821,41 @@ mod held_drop_tests {
                 if all { 4 } else { 1 }
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod villager_food_tests {
+    use super::*;
+
+    /// A villager's food is the item's `villager_food` component, read from the registry:
+    /// vanilla's four (bread 4, the rest 1) and nothing else.
+    #[test]
+    fn the_registry_tells_a_villagers_food() {
+        let Some(items) = prepared_items() else {
+            return;
+        };
+        let food: Vec<(&str, Option<i32>)> = [
+            "minecraft:bread",
+            "minecraft:carrot",
+            "minecraft:potato",
+            "minecraft:beetroot",
+            "minecraft:apple",
+        ]
+        .map(|i| (i, items.get(i).and_then(|i| i.villager_food)))
+        .into();
+        assert_eq!(
+            food,
+            [
+                ("minecraft:bread", Some(4)),
+                ("minecraft:carrot", Some(1)),
+                ("minecraft:potato", Some(1)),
+                ("minecraft:beetroot", Some(1)),
+                ("minecraft:apple", None),
+            ]
+        );
+        // Loading the registry hands the mobs the same table.
+        assert_eq!(villager_food("minecraft:bread"), Some(4));
+        assert_eq!(villager_food("minecraft:apple"), Some(0));
     }
 }

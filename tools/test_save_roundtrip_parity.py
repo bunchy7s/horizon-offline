@@ -86,7 +86,7 @@ IGNORED = {
     r'server_data\.state_updating_resumes_at)$':
         'block entity timers advance',
     r'^entity\.(Passengers\[\]\.)*(Age|Motion\[\]|Rotation\[\]|Pos\[\]|OnGround|HurtTime|Health|TimeInOverworld|fall_distance|'
-    r'wasOnGround|Fire|Air|DeathTime|Fuse|life|inGround|ticks_in_ground|Time)$': 'entity simulation advances',
+    r'wasOnGround|Fire|Air|DeathTime|Fuse|life|inGround|ticks_in_ground|Time|EggLayTime)$': 'entity simulation advances',
     r'^level\.dat\.Data\.(Time|LastPlayed)$': 'clock and wall time of the save',
     r'^level\.dat\.Data\.(ServerBrands.*|singleplayer_uuid)$': 'a client world names its brand and its player',
     r'^entity\.listener\.selector\.(event|tick)$': 'the warden listener holds the last vibration it heard; timing',
@@ -193,11 +193,16 @@ def entity_uuid(i):
 def entity_command(i, kind, extra):
     x = 3 + 3 * (i % 10)
     z = 36 + 3 * (i // 10)
+    # `summon` places the entity at the command's coordinates, not at NBT Pos, so a
+    # scene entry that has to stand somewhere (next to a fence) names it in Pos.
+    at = re.search(r'Pos:\[(-?[0-9.]+)d,(-?[0-9.]+)d,(-?[0-9.]+)d\]', extra)
+    if at:
+        x, z = at.group(1), at.group(3)
     nbt = (f'UUID:{entity_uuid(i)},NoAI:1b,Silent:1b,NoGravity:1b,Invulnerable:1b,Tags:["rt"],'
            f'CustomName:{{text:"E{i}"}}' + (',' + extra if extra else ''))
     if kind in ('item_frame', 'glow_item_frame', 'painting'):
         nbt += f',block_pos:[I;{x},-60,{z}],Pos:[{x}.5d,-60.0d,{z}.5d]'
-    return f'summon minecraft:{kind} {x} -60 {z} {{{nbt}}}'
+    return f'summon minecraft:{kind} {x} {at.group(2) if at else -60} {z} {{{nbt}}}'
 
 
 def block_position(i):
@@ -272,6 +277,10 @@ def build_world(directory):
     for i, (block, nbt) in enumerate(scene.BLOCK_ENTITIES):
         x, y, z = block_position(i)
         command = f'setblock {x} {y} {z} minecraft:{block}{nbt}'
+        out = server.run(command)
+        if command_failed(out):
+            failed.append((command, out))
+    for command in scene.SETBLOCKS:
         out = server.run(command)
         if command_failed(out):
             failed.append((command, out))
@@ -536,6 +545,10 @@ def compare_entities(vanilla, horizon, report, chunks=None):
                 out[uuid] = e
         return out
     a, b = collect(vanilla), collect(horizon)
+    # Vanilla drops a lead whose holder it cannot find, which would leave nothing to compare.
+    leads = sum('leash' in e for e in a.values())
+    if leads != scene.LEADS:
+        report.append(('vanilla kept leads in the scene', scene.LEADS, leads))
     # Entities Horizon adds in the chunks vanilla never generated (chunk-generation
     # spawns) are not part of the scene; anywhere else they are a difference.
     vanilla_chunks = {chunk_of(e) for e in a.values()} | set(chunks or ())

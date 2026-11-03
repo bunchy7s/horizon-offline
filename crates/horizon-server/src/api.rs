@@ -529,22 +529,11 @@ fn updates(shared: &Shared) -> Value {
     })
 }
 
-/// A random token: two 64-bit hashes keyed by the OS's random hasher seeds, the time and the process.
+/// A random token: 128 bits from the OS's random generator, as 32 hex digits.
 pub fn random_token() -> String {
-    use std::hash::{BuildHasher, Hasher};
-    (0..2u64)
-        .map(|i| {
-            let mut h = std::collections::hash_map::RandomState::new().build_hasher();
-            h.write_u64(i);
-            h.write_u128(
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map_or(0, |d| d.as_nanos()),
-            );
-            h.write_u32(std::process::id());
-            format!("{:016x}", h.finish())
-        })
-        .collect()
+    let mut bytes = [0u8; 16];
+    getrandom::fill(&mut bytes).expect("OS random generator");
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 pub fn same_token(a: &str, b: &str) -> bool {
@@ -938,6 +927,14 @@ mod tests {
                 vec![(LOG_LINES + 8).to_string(), (LOG_LINES + 9).to_string()]
             )
         );
+    }
+
+    #[test]
+    fn tokens_are_32_hex_digits_and_differ() {
+        let (a, b) = (random_token(), random_token());
+        assert_eq!(a.len(), 32);
+        assert!(a.bytes().all(|c| c.is_ascii_hexdigit()));
+        assert_ne!(a, b);
     }
 
     #[test]

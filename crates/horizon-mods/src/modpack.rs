@@ -161,21 +161,51 @@ impl Modpack {
         let file = std::fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
         let mut zip = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
         let mut written = Vec::new();
+        let mut total = 0u64;
         for name in &pack.overrides {
-            let mut entry = zip
-                .by_name(&format!("{OVERRIDES}{name}"))
-                .map_err(|e| format!("{name}: {e}"))?;
-            let target = home.join(name);
-            if let Some(dir) = target.parent() {
-                std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+            // A zip's declared sizes are the pack's own claim, so the limits
+            // are counted again on the bytes actually inflated.
+            let result = Self::extract_one(&mut zip, name, home, &mut total);
+            match result {
+                Ok(target) => written.push(target),
+                Err(e) => {
+                    for target in &written {
+                        let _ = std::fs::remove_file(target);
+                    }
+                    return Err(e);
+                }
             }
-            let mut out =
-                std::fs::File::create(&target).map_err(|e| format!("{}: {e}", target.display()))?;
-            std::io::copy(&mut (&mut entry).take(MAX_OVERRIDE), &mut out)
-                .map_err(|e| format!("{}: {e}", target.display()))?;
-            written.push(target);
         }
         Ok(written)
+    }
+
+    fn extract_one(
+        zip: &mut zip::ZipArchive<std::fs::File>,
+        name: &str,
+        home: &Path,
+        total: &mut u64,
+    ) -> Result<PathBuf, String> {
+        let mut entry = zip
+            .by_name(&format!("{OVERRIDES}{name}"))
+            .map_err(|e| format!("{name}: {e}"))?;
+        let target = home.join(name);
+        if let Some(dir) = target.parent() {
+            std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        }
+        let mut out =
+            std::fs::File::create(&target).map_err(|e| format!("{}: {e}", target.display()))?;
+        let copied = std::io::copy(&mut (&mut entry).take(MAX_OVERRIDE + 1), &mut out)
+            .map_err(|e| format!("{}: {e}", target.display()))?;
+        *total += copied;
+        if copied > MAX_OVERRIDE || *total > MAX_OVERRIDES {
+            let _ = std::fs::remove_file(&target);
+            return Err(if copied > MAX_OVERRIDE {
+                format!("{name} is over {} MiB", MAX_OVERRIDE >> 20)
+            } else {
+                format!("overrides are over {} MiB", MAX_OVERRIDES >> 20)
+            });
+        }
+        Ok(target)
     }
 }
 

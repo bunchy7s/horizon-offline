@@ -1,0 +1,17 @@
+{
+  "hooks": [
+    {
+      "name": "village_siege",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_village_siege",
+      "side": "server",
+      "cancellable": true,
+      "neoforge": "VillageSiegeEvent",
+      "mod_api": {
+        "contract": "cancel",
+        "out": "canceled"
+      }
+    }
+  ],
+  "rust_summary": "A village siege found a spawn position, cancellable (`native_village_siege`).",
+  "doc_summary": "`native_village_siege(dimension, player, attempted_pos, canceled)`, run on the server when a village siege finds a spawn position (NeoForge's `VillageSiegeEvent`, vanilla's `VillageSiege.tryToSetupSiege`). `player` is the player's UUID, `attempted_pos` is the found position, and the siege is the dimension's singleton. Set `canceled` to stop the siege. Bundles need \"hooks\": @API:native_village_siege@."
+}

@@ -633,7 +633,14 @@ pub(super) fn level_shapes(
         "minecraft:the_end",
     ] {
         let shape = overrides.level_height(level).and_then(|h| {
-            LevelShape::new(h.min_y, h.height, h.logical_height, h.has_skylight).ok()
+            LevelShape::new(
+                h.min_y,
+                h.height,
+                h.logical_height,
+                h.has_skylight,
+                h.has_ceiling,
+            )
+            .ok()
         });
         match shape {
             Some(shape) => *shapes.get_mut(level) = shape,
@@ -700,13 +707,15 @@ pub(super) fn make_streaming(
                 shape,
             )
         });
-    // `FlatLevelSource.createState`: a superflat world whose settings let structure sets
-    // generate runs them on its flat ground.
+    // PlaceCommand.placeJigsaw/placeStructure generate directly, independently
+    // of WorldOptions.generateStructures. Keep their flat locator available
+    // even when automatic structure starts are disabled.
+    let automatic_structures =
+        horizon_client::save::WorldGen::read(world_root).is_none_or(|w| w.structures);
     let flat_structures = (dim == Dim::Overworld)
         .then(|| horizon_client::save::world_gen_settings(world_root))
         .flatten()
-        .and_then(|s| horizon_client::flatgen::FlatTerrain::structure_settings(&s))
-        .filter(|_| horizon_client::save::WorldGen::read(world_root).is_none_or(|w| w.structures));
+        .and_then(|s| horizon_client::flatgen::FlatTerrain::structure_settings(&s));
     // A generator that cannot be built (a layer block the registry lacks, a level shorter
     // than the noise) leaves the world on its flat ground, as it was before.
     let flat_vanilla = flat_structures.and_then(|settings| {
@@ -719,7 +728,7 @@ pub(super) fn make_streaming(
             &biomes,
             seed,
             &settings,
-            true,
+            automatic_structures,
         ) {
             Ok(mut terrain) => {
                 terrain.add_mod_signs(res.facts());
@@ -739,10 +748,14 @@ pub(super) fn make_streaming(
                 registry: pack.assets.clone(),
                 biomes: biomes.clone(),
             }),
-            pack.context.clone(),
+            pack.context_with(biomes.clone()),
             res.threads(),
         )
-    } else if let Some(inner) = flat_vanilla {
+    } else if let Some(inner) = flat_vanilla
+        .as_ref()
+        .filter(|_| automatic_structures)
+        .cloned()
+    {
         inner.search_rings_behind();
         inner.set_reference_file(world_root.join("data").join(format!(
             "horizon_structure_references_{}.json",
@@ -762,10 +775,13 @@ pub(super) fn make_streaming(
                 registry: pack.assets.clone(),
                 biomes: biomes.clone(),
             }),
-            pack.context.clone(),
+            pack.context_with(biomes.clone()),
             res.threads(),
         )
     } else if let Some(inner) = flat {
+        // Keep the existing flat terrain/decorations path when automatic
+        // structures are off; only manual commands use the locator.
+        locator = flat_vanilla;
         Streaming::new(
             Arc::new(Persistent {
                 inner: Arc::new(inner),
@@ -773,7 +789,7 @@ pub(super) fn make_streaming(
                 registry: pack.assets.clone(),
                 biomes: biomes.clone(),
             }),
-            pack.context.clone(),
+            pack.context_with(biomes.clone()),
             res.threads(),
         )
     } else if options.test_terrain && dim == Dim::Overworld {
@@ -785,7 +801,7 @@ pub(super) fn make_streaming(
                 registry: pack.assets.clone(),
                 biomes: biomes.clone(),
             }),
-            pack.context.clone(),
+            pack.context_with(biomes.clone()),
             res.threads(),
         )
     } else {
@@ -795,7 +811,10 @@ pub(super) fn make_streaming(
         let preset = horizon_client::save::WorldGen::preset(world_root);
         let overrides =
             world_worldgen_overrides(world_root, &options.resources, &biomes, enabled_features);
-        let mut inner = VanillaTerrain::for_world_with(&options.resources.join("worldgen"), &overrides, pack.assets.registry, &biomes, seed, preset, dim.id(), structures).map_err(|e| {
+        let saved_stem = horizon_client::save::world_gen_settings(world_root)
+            .and_then(|s| s.get("dimensions")?.get(dim.id()).cloned())
+            .map(|stem| horizon_client::scoreboard::tag_to_json(&stem));
+        let mut inner = VanillaTerrain::for_world_with_settings(&options.resources.join("worldgen"), &overrides, pack.assets.registry, &biomes, seed, preset, dim.id(), structures, saved_stem.as_ref()).map_err(|e| {
                 if overrides.is_empty() {
                     format!("{e}\nPrepare the worldgen bundle with the launcher, or: horizon-prepare --prepare")
                 } else {
@@ -834,7 +853,7 @@ pub(super) fn make_streaming(
                 registry: pack.assets.clone(),
                 biomes: biomes.clone(),
             }),
-            pack.context.clone(),
+            pack.context_with(biomes.clone()),
             res.threads(),
         )
     };

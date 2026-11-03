@@ -1924,6 +1924,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "glam"
+version = "0.30.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "19fc433e8437a212d1b6f1e68c7824af3aed907da60afa994e7f542d18d12aa9"
+
+[[package]]
 name = "glow"
 version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2651,6 +2657,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "horizon-cosmetics"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "glam",
+ "png 0.18.1",
+ "serde",
+ "serde_json",
+ "ureq",
+]
+
+[[package]]
 name = "horizon-friends"
 version = "0.1.0"
 dependencies = [
@@ -2682,6 +2700,7 @@ dependencies = [
  "gpui-fast-platform",
  "horizon-bench",
  "horizon-core",
+ "horizon-cosmetics",
  "horizon-friends",
  "horizon-mcp",
  "horizon-mods",

@@ -32,6 +32,12 @@ pub(super) struct Burst {
     breeze: bool,
     wind_charge: bool,
 }
+/// Whether a wind push must wait for the entity's own tick: it joined before
+/// the charge (`id` below the charge's), so vanilla has ticked it already this
+/// game tick, and its kind ticks after the projectiles here.
+fn push_waits_for_tick(ticks_after_projectiles: bool, id: u32, charge: Option<u32>) -> bool {
+    ticks_after_projectiles && charge.is_some_and(|c| id < c)
+}
 /// `Projectile.deflect` with `ProjectileDeflection.REVERSE`.
 pub(super) fn reverse(p: &mut Projectile, jitter: f32) {
     p.velocity = Vec3::new(
@@ -108,7 +114,10 @@ impl Game<'_> {
             ],
             Hit::None => return Ok(()),
         };
-        self.wind_burst(center, radius, knockback, breeze, !breeze)
+        self.creatures.wind_source = Some(p.id());
+        let burst = self.wind_burst(center, radius, knockback, breeze, !breeze);
+        self.creatures.wind_source = None;
+        burst
     }
     /// `AbstractWindCharge.onHitEntity`: one point of damage.
     fn wind_charge_damage(&mut self, p: &Projectile, who: Who) {
@@ -281,6 +290,8 @@ impl Game<'_> {
             items_ignore: !blocklike,
             spared: None,
         };
+        let source = self.creatures.wind_source;
+        let mut late = Vec::new();
         let mut entities = self.take_entities();
         for_each_entity_mut!(entities, entity => {
             if entity.ignores_explosion(&burst) || !entity.pushed_by_wind() {
@@ -300,10 +311,35 @@ impl Game<'_> {
             let mut push = [dir[0] * power, dir[1] * power, dir[2] * power];
             let id = Some(entity.id());
             self.native_explosion_knockback(self.dim.id(), center, blocks, id, &mut push);
-            entity.push_from_explosion(Vec3::new(push[0], push[1], push[2]));
+            let push = Vec3::new(push[0], push[1], push[2]);
+            // ServerLevel ticks entities in the order they joined. One that
+            // joined before the charge has ticked by now in vanilla, so the
+            // push is for its next tick; here its kind ticks after the
+            // projectiles, so the push waits for that tick to run.
+            if push_waits_for_tick(entity.ticks_after_projectiles(), entity.id(), source) {
+                late.push((entity.id(), push));
+            } else {
+                entity.push_from_explosion(push);
+            }
         });
         self.restore_entities(entities);
+        self.creatures.late_wind_pushes.extend(late);
         pushed
+    }
+    /// The pushes `wind_knockback` held for entities that tick after the
+    /// projectiles, applied once those entities have ticked.
+    pub(super) fn apply_late_wind_pushes(&mut self) {
+        let late = std::mem::take(&mut self.creatures.late_wind_pushes);
+        if late.is_empty() {
+            return;
+        }
+        let mut entities = self.take_entities();
+        for_each_entity_mut!(entities, entity => {
+            if let Some((_, push)) = late.iter().find(|(id, _)| *id == entity.id()) {
+                entity.push_from_explosion(*push);
+            }
+        });
+        self.restore_entities(entities);
     }
     /// `ServerExplosion.hurtEntities` for the player: the push, less
     /// explosion knockback resistance, and `ServerPlayer.onExplosionHit`.
@@ -591,6 +627,32 @@ mod tests {
         assert!(triggers("minecraft:stone_button"));
         assert!(triggers("minecraft:bell"));
         assert!(!triggers("minecraft:stone"));
+    }
+    /// ServerLevel ticks entities in join order: an orb, falling block or TNT that
+    /// joined before the charge has moved by the time the charge bursts, so the
+    /// push belongs to its next tick; one that joined after has not.
+    #[test]
+    fn a_push_waits_only_for_late_ticking_kinds_that_joined_before_the_charge() {
+        use crate::game::entity::Entity;
+        assert!(push_waits_for_tick(true, 3, Some(7)));
+        assert!(!push_waits_for_tick(true, 9, Some(7)), "joined after");
+        assert!(!push_waits_for_tick(false, 3, Some(7)), "ticks before it");
+        assert!(!push_waits_for_tick(true, 3, None), "not a charge's burst");
+        let tnt = crate::game::tnt::PrimedTnt {
+            id: 1,
+            position: Vec3::ZERO,
+            previous: Vec3::ZERO,
+            velocity: Vec3::ZERO,
+            fuse: 80,
+            on_ground: false,
+            owner: None,
+            guest: None,
+            no_gravity: false,
+            power: 4.0,
+        };
+        assert!(Entity::ticks_after_projectiles(&tnt));
+        let arrow = Projectile::new(ProjectileKind::Snowball, Vec3::ZERO, None);
+        assert!(!Entity::ticks_after_projectiles(&arrow));
     }
     #[test]
     fn a_deflected_projectile_turns_around_at_half_speed() {

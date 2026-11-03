@@ -283,6 +283,28 @@ impl Path {
     pub fn same_as(&self, other: Option<&Path>) -> bool {
         other.is_some_and(|o| o.nodes == self.nodes)
     }
+    /// `PathNavigation.trimPath`: a node standing on a cauldron
+    /// (`BlockTags.CAULDRONS`) is raised onto its rim, and the node after it is
+    /// raised to the rim's height too when it is not above the cauldron, so a
+    /// route that ends on a cauldron (a leatherworker's job site) aims at the
+    /// top face instead of into the block.
+    pub fn raise_cauldron_nodes(&mut self, is_cauldron: impl Fn(i32, i32, i32) -> bool) {
+        for i in 0..self.nodes.len() {
+            let node = self.nodes[i];
+            if !is_cauldron(node.x, node.y, node.z) {
+                continue;
+            }
+            self.nodes[i].y = node.y + 1;
+            if let Some(&next) = self.nodes.get(i + 1)
+                && node.y >= next.y
+            {
+                self.nodes[i + 1] = PathNode {
+                    y: node.y + 1,
+                    ..next
+                };
+            }
+        }
+    }
 }
 
 struct Target {
@@ -1393,5 +1415,75 @@ impl<'a, 'w> Finder<'a, 'w> {
                         .then(a.nodes.len().cmp(&b.nodes.len()))
                 })
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn node(x: i32, y: i32, z: i32) -> PathNode {
+        PathNode {
+            x,
+            y,
+            z,
+            kind: PathType::Open,
+        }
+    }
+
+    fn path(nodes: Vec<PathNode>) -> Path {
+        Path {
+            nodes,
+            next: 0,
+            target: [0, 0, 0],
+            dist_to_target: 0.0,
+            reached: true,
+        }
+    }
+
+    /// `PathNavigation.trimPath`: the node standing on a cauldron moves onto its
+    /// rim, and the node after it follows when it is not above the cauldron.
+    #[test]
+    fn a_node_on_a_cauldron_is_raised_onto_its_rim() {
+        let mut p = path(vec![
+            node(0, 63, 0),
+            node(1, 63, 0),
+            node(2, 63, 0),
+            node(2, 66, 0),
+        ]);
+        p.raise_cauldron_nodes(|x, y, _| x == 2 && y == 63);
+        assert_eq!(p.nodes[0], node(0, 63, 0), "a plain node keeps its height");
+        assert_eq!(p.nodes[1], node(1, 63, 0));
+        assert_eq!(
+            p.nodes[2],
+            node(2, 64, 0),
+            "the cauldron node is raised one block"
+        );
+        assert_eq!(
+            p.nodes[3],
+            node(2, 66, 0),
+            "a node above the cauldron is left alone"
+        );
+        assert_eq!(p.target, [0, 0, 0], "the requested target does not move");
+    }
+
+    /// The node after a cauldron is raised with it unless it is above it, so a
+    /// route that steps off a cauldron does not drop back into the block.
+    #[test]
+    fn the_node_after_a_cauldron_follows_it_up() {
+        let mut p = path(vec![node(0, 63, 0), node(1, 63, 0)]);
+        p.raise_cauldron_nodes(|_, y, _| y == 63);
+        // The closure still reports the original height, as the block under the
+        // raised node is the cauldron itself.
+        assert_eq!(p.nodes, vec![node(0, 64, 0), node(1, 64, 0)]);
+    }
+
+    /// A path with no cauldron under it is not touched.
+    #[test]
+    fn a_path_without_cauldrons_is_unchanged() {
+        let nodes = vec![node(0, 64, 0), node(1, 64, 0), node(1, 65, 0)];
+        let mut p = path(nodes.clone());
+        p.raise_cauldron_nodes(|_, _, _| false);
+        assert_eq!(p.nodes, nodes);
     }
 }

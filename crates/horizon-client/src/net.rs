@@ -946,7 +946,25 @@ fn configure(
                     )),
                 }))?;
             }
-            cfg::Clientbound::CustomPayload(p) => receive_brand(&p, send),
+            cfg::Clientbound::CustomPayload(p) => {
+                // Horizon servers use the client brand to negotiate their extensions.
+                // Announce those only after the server identifies itself as Horizon.
+                if p.channel == "minecraft:brand"
+                    && horizon_protocol::buf::Reader::new(&p.data)
+                        .string(32767)
+                        .ok()
+                        .as_deref()
+                        == Some("horizon")
+                {
+                    let mut w = horizon_protocol::buf::Writer::new();
+                    w.string("horizon");
+                    reply(cfg::Serverbound::CustomPayload(cfg::CustomPayload {
+                        channel: "minecraft:brand".into(),
+                        data: w.data,
+                    }))?;
+                }
+                receive_brand(&p, send);
+            }
             cfg::Clientbound::Ping(p) => reply(cfg::Serverbound::Pong(p))?,
             // Know no packs: the server then sends every registry entry in full.
             cfg::Clientbound::SelectKnownPacks(_) => {
@@ -1027,10 +1045,10 @@ fn receive_brand(payload: &cfg::CustomPayload, send: &Sender<Event>) {
     }
 }
 
-/// The minecraft:brand payload: a string naming the client.
+/// `ClientBrandRetriever.getClientModName`: vanilla's default client brand.
 fn brand() -> Vec<u8> {
     let mut w = horizon_protocol::buf::Writer::new();
-    w.string("horizon");
+    w.string("vanilla");
     w.data
 }
 
@@ -1237,32 +1255,103 @@ mod tests {
     }
 
     #[test]
-    fn direct_login_keeps_the_hostname_in_the_handshake() {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let port = listener.local_addr().unwrap().port();
-        let session = Session::connect(
-            &format!("localhost:{port}"),
-            "Probe",
-            None,
-            cfg::ClientInformation::new(8),
-            Arc::new(Language::new()),
-            PathBuf::new(),
-        );
-        let (stream, _) = listener.accept().unwrap();
-        stream
-            .set_read_timeout(Some(Duration::from_secs(5)))
-            .unwrap();
-        let mut server = Connection::from_stream(stream).unwrap();
-        let (id, body) = server.recv().unwrap();
-        let handshake::Serverbound::Intention(packet) =
-            handshake::Serverbound::decode(id, &body).unwrap()
-        else {
-            panic!("expected login handshake")
-        };
-        assert_eq!((packet.host.as_str(), packet.port), ("localhost", port));
-        assert_eq!(packet.intent, handshake::LOGIN);
-        drop(server);
-        drop(session);
+    fn direct_login_preserves_hostname_and_negotiates_brand() {
+        for server_brand in [
+            b"\x07vanilla".as_slice(),
+            b"\x07horizon",
+            b"\x05Paper",
+            b"\xff",
+        ] {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let port = listener.local_addr().unwrap().port();
+            let session = Session::connect(
+                &format!("localhost:{port}"),
+                "Probe",
+                None,
+                cfg::ClientInformation::new(8),
+                Arc::new(Language::new()),
+                PathBuf::new(),
+            );
+            let (stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let mut server = Connection::from_stream(stream).unwrap();
+            let (id, body) = server.recv().unwrap();
+            let handshake::Serverbound::Intention(packet) =
+                handshake::Serverbound::decode(id, &body).unwrap()
+            else {
+                panic!("expected login handshake")
+            };
+            assert_eq!((packet.host.as_str(), packet.port), ("localhost", port));
+            assert_eq!(packet.intent, handshake::LOGIN);
+            server.recv().unwrap(); // login profile
+            server
+                .send(
+                    &login::Clientbound::LoginFinished(login::LoginFinished {
+                        profile: login::GameProfile {
+                            uuid: 1,
+                            name: "Probe".into(),
+                            properties: vec![],
+                        },
+                        session: 1,
+                    })
+                    .encode(),
+                )
+                .unwrap();
+            let (id, body) = server.recv().unwrap();
+            assert!(matches!(
+                login::Serverbound::decode(id, &body).unwrap(),
+                login::Serverbound::LoginAcknowledged(_)
+            ));
+            let (id, body) = server.recv().unwrap();
+            assert!(matches!(
+                cfg::Serverbound::decode(id, &body).unwrap(),
+                cfg::Serverbound::ClientInformation(_)
+            ));
+            let (id, body) = server.recv().unwrap();
+            assert_eq!(
+                cfg::Serverbound::decode(id, &body).unwrap(),
+                cfg::Serverbound::CustomPayload(cfg::CustomPayload {
+                    channel: "minecraft:brand".into(),
+                    data: b"\x07vanilla".to_vec(),
+                })
+            );
+            server
+                .send(
+                    &cfg::Clientbound::CustomPayload(cfg::CustomPayload {
+                        channel: "minecraft:brand".into(),
+                        data: server_brand.to_vec(),
+                    })
+                    .encode(),
+                )
+                .unwrap();
+            server
+                .send(
+                    &cfg::Clientbound::SelectKnownPacks(cfg::SelectKnownPacks { packs: vec![] })
+                        .encode(),
+                )
+                .unwrap();
+            if server_brand == b"\x07horizon" {
+                let (id, body) = server.recv().unwrap();
+                assert_eq!(
+                    cfg::Serverbound::decode(id, &body).unwrap(),
+                    cfg::Serverbound::CustomPayload(cfg::CustomPayload {
+                        channel: "minecraft:brand".into(),
+                        data: b"\x07horizon".to_vec(),
+                    })
+                );
+            }
+            // The response to the pack query proves any brand reply precedes it.
+            // Non-Horizon servers must receive no additional brand announcement.
+            let (id, body) = server.recv().unwrap();
+            assert_eq!(
+                cfg::Serverbound::decode(id, &body).unwrap(),
+                cfg::Serverbound::SelectKnownPacks(cfg::SelectKnownPacks { packs: vec![] })
+            );
+            drop(server);
+            drop(session);
+        }
     }
 
     #[test]

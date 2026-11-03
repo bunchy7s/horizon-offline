@@ -77,6 +77,13 @@ fn one_of(v: &Value, names: &[&str]) -> Result<String> {
 }
 
 impl SpecialModel {
+    /// A special model type of another namespace, which Horizon has no renderer for.
+    pub fn is_foreign(v: &Value) -> bool {
+        v.get("type")
+            .and_then(Value::as_str)
+            .and_then(|t| super::identifier(t).ok())
+            .is_some_and(|t| super::foreign::is_foreign(&t))
+    }
     pub fn decode(v: &Value) -> Result<Self> {
         let m = object(v)?;
         let float_or = |key: &str, default: f32| get(m, key).map_or(Ok(default), float);
