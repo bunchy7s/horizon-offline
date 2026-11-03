@@ -138,14 +138,14 @@ pub const TRIM_SLOTS: usize = 32;
 pub fn decode(path: &Path) -> Result<(u32, u32, Vec<u8>)> {
     decode_bytes(&horizon_core::prepared_files::read(path)?)
 }
-/// A PNG in memory as RGBA pixels.
-/// The image formats [`decode_bytes`] reads, told apart by their own leading
-/// bytes rather than by a file name: what a server sends has no name, and a
-/// name would not be trustworthy anyway.
+/// The image formats [`decode_image_bytes`] reads, told apart by their own
+/// leading bytes rather than by a file name: what a server sends has no name,
+/// and a name would not be trustworthy anyway.
 ///
-/// The game's own resources are PNG throughout; WebP and JPEG are here for
-/// images fetched from the network (Modrinth project icons in the resource
-/// pack browser), which are commonly either.
+/// The game's own resources are PNG throughout, and so are a resource pack's
+/// (vanilla's `NativeImage.read` takes PNG only), so [`decode_bytes`] stays
+/// PNG-only. WebP and JPEG are for images fetched from the network (Modrinth
+/// project icons in the resource pack browser), which are commonly either.
 enum ImageFormat {
     Png,
     /// `RIFF....WEBP`.
@@ -171,12 +171,24 @@ impl ImageFormat {
     }
 }
 
+/// The most pixels a fetched image may claim: its header alone sizes the
+/// buffer, and a hostile one could ask for gigabytes. 4096 x 4096 RGBA is 64 MiB.
+const MAX_FETCHED_PIXELS: u64 = 4096 * 4096;
+
+fn check_fetched_size(width: u64, height: u64) -> Result<()> {
+    if width * height > MAX_FETCHED_PIXELS {
+        return Err(format!("a {width}x{height} image is too large to decode").into());
+    }
+    Ok(())
+}
+
 /// A WebP image as RGBA8. Still frames and animations both decode; an
 /// animation gives its first frame, as an animated PNG would.
 fn decode_webp(data: &[u8]) -> Result<(u32, u32, Vec<u8>)> {
     let mut decoder =
         image_webp::WebPDecoder::new(std::io::Cursor::new(data)).map_err(|e| e.to_string())?;
     let (width, height) = decoder.dimensions();
+    check_fetched_size(u64::from(width), u64::from(height))?;
     // Four bytes a pixel whether or not the image carries alpha: the caller
     // always wants RGBA.
     let mut rgba = vec![0u8; (width as usize) * (height as usize) * 4];
@@ -195,9 +207,12 @@ fn decode_webp(data: &[u8]) -> Result<(u32, u32, Vec<u8>)> {
 /// A JPEG image as RGBA8. JPEG has no alpha, so every pixel is opaque.
 fn decode_jpeg(data: &[u8]) -> Result<(u32, u32, Vec<u8>)> {
     let mut decoder = zune_jpeg::JpegDecoder::new(data);
-    let pixels = decoder.decode().map_err(|e| e.to_string())?;
+    // The size comes from the headers, before any pixel buffer is made.
+    decoder.decode_headers().map_err(|e| e.to_string())?;
     let info = decoder.info().ok_or("the JPEG states no size")?;
     let (width, height) = (u32::from(info.width), u32::from(info.height));
+    check_fetched_size(u64::from(width), u64::from(height))?;
+    let pixels = decoder.decode().map_err(|e| e.to_string())?;
     let count = (width as usize) * (height as usize);
     // The decoder gives RGB for a colour image and one byte a pixel for a
     // greyscale one; both become RGBA here.
@@ -219,15 +234,19 @@ fn decode_jpeg(data: &[u8]) -> Result<(u32, u32, Vec<u8>)> {
     Ok((width, height, rgba))
 }
 
-pub fn decode_bytes(data: &[u8]) -> Result<(u32, u32, Vec<u8>)> {
-    // Anything that is not a PNG goes to its own decoder first; unknown bytes
-    // fall through to the PNG reader so its error is the one reported, as
-    // before.
+/// An image fetched from the network (PNG, WebP or JPEG) as RGBA pixels. WebP
+/// and JPEG go to their own decoders; anything else goes to the PNG reader, so
+/// its error is the one reported.
+pub fn decode_image_bytes(data: &[u8]) -> Result<(u32, u32, Vec<u8>)> {
     match ImageFormat::sniff(data) {
-        Some(ImageFormat::WebP) => return decode_webp(data),
-        Some(ImageFormat::Jpeg) => return decode_jpeg(data),
-        Some(ImageFormat::Png) | None => {}
+        Some(ImageFormat::WebP) => decode_webp(data),
+        Some(ImageFormat::Jpeg) => decode_jpeg(data),
+        Some(ImageFormat::Png) | None => decode_bytes(data),
     }
+}
+
+/// A PNG in memory as RGBA pixels.
+pub fn decode_bytes(data: &[u8]) -> Result<(u32, u32, Vec<u8>)> {
     let mut decoder = png::Decoder::new(std::io::Cursor::new(data));
     decoder.ignore_checksums(true);
     decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
@@ -2820,6 +2839,23 @@ mod tests {
         assert!(ImageFormat::sniff(b"RIFF").is_none());
         assert!(ImageFormat::sniff(b"").is_none());
         assert!(ImageFormat::sniff(b"<html>").is_none());
+    }
+
+    #[test]
+    fn a_fetched_image_may_not_claim_more_than_4096_squared() {
+        assert!(check_fetched_size(4096, 4096).is_ok());
+        assert!(check_fetched_size(4097, 4096).is_err());
+        assert!(check_fetched_size(16_383, 16_383).is_err());
+    }
+
+    /// Only the network path reads WebP and JPEG: a resource pack's texture
+    /// stays PNG-only, as vanilla's `NativeImage.read` is.
+    #[test]
+    fn decode_bytes_stays_png_only() {
+        let jpeg = [0xFF, 0xD8, 0xFF, 0xE0, 0, 0x10];
+        assert!(decode_bytes(&jpeg).is_err());
+        let webp = b"RIFF\x00\x00\x00\x00WEBPVP8 ";
+        assert!(decode_bytes(webp).is_err());
     }
 
     #[test]
