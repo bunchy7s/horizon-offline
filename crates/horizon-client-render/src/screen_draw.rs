@@ -87,6 +87,30 @@ pub fn fill(out: &mut Vec<Draw>, x0: i32, y0: i32, x1: i32, y1: i32, color: i32)
         color,
     });
 }
+/// What a screen wants drawn behind it, for screens that are Horizon's own.
+///
+/// The panorama is the spinning cube the renderer draws before the HUD, not
+/// something a draw list can hold, so a screen cannot simply emit it: it says
+/// here that it wants one and the renderer obeys. Existing screens that
+/// already show a panorama (the title and the loading screens) decide it
+/// their own way, in `Game::shows_panorama`, and are untouched by this: a
+/// screen that leaves this at [`Backdrop::None`] behaves exactly as before.
+///
+/// This exists so a new Horizon screen can have the menu panorama without
+/// each one growing its own special case in the frame loop.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Backdrop {
+    /// Whatever is already behind the screen: the world, or the flat menu
+    /// background the screen draws itself. The default, and what every
+    /// vanilla screen uses.
+    #[default]
+    None,
+    /// The menu panorama, as the title screen shows it. The screen should
+    /// still draw its own panels over it; the panorama only replaces what
+    /// would otherwise be empty background.
+    Panorama,
+}
+
 pub fn sprite(out: &mut Vec<Draw>, sprite: &str, x: i32, y: i32, w: i32, h: i32) {
     out.push(Draw::Sprite {
         sprite: sprite.to_owned(),

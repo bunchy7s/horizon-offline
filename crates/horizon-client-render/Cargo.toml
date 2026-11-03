@@ -7,6 +7,7 @@ rust-version = "1.90"
 description = "The client's world data, rendering and screens: chunks, meshing, light, streaming, the renderer, the HUD, menus and settings; no gameplay"
 
 [dependencies]
+horizon-cosmetics = { path = "../horizon-cosmetics" }
 # The GUI atlas's pixels, kept compressed once uploaded (hud.rs `pack_pixels`).
 lz4_flex = { version = "0.14", default-features = false, features = ["std", "safe-encode", "safe-decode", "checked-decode"] }
 horizon-assets = { path = "../horizon-assets" }
@@ -42,6 +43,10 @@ miniz_oxide = "0.8"
 naga = { version = "30.0.1", features = ["wgsl-in", "glsl-in", "hlsl-out"] }
 half = "2"
 png = "0.18"
+# Project icons served by Modrinth are often WebP or JPEG rather than PNG, and
+# the pack browser showed nothing for those. Both are small pure-Rust decoders.
+image-webp = { version = "0.2", default-features = false }
+zune-jpeg = { version = "0.4", default-features = false, features = ["std"] }
 pollster = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1.0.151", features = ["raw_value"] }

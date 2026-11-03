@@ -127,8 +127,25 @@ impl Game<'_> {
                     auto_save(state),
                     enabled
                 ));
-                set_auto_save(state, enabled);
+                set_auto_save(&state.lists, enabled);
                 return json!({ "value": auto_save(state) });
+            }
+            "serversettings/pause_when_empty_seconds" => {
+                return json!({ "value": state.pause_when_empty_seconds });
+            }
+            "serversettings/pause_when_empty_seconds/set" => {
+                let Some(seconds) = body["value"]
+                    .as_i64()
+                    .and_then(|value| i32::try_from(value).ok())
+                else {
+                    return json!({ "error": "pause when empty seconds must be an integer" });
+                };
+                rpc(format!(
+                    "Update pause when empty from {} seconds to {} seconds",
+                    state.pause_when_empty_seconds, seconds
+                ));
+                self.set_pause_when_empty_seconds(state, seconds);
+                return json!({ "value": state.pause_when_empty_seconds });
             }
             "serversettings/motd" => {
                 return json!({
@@ -185,6 +202,24 @@ impl Game<'_> {
                 state.force_game_mode = force;
                 self.set_force_game_mode(force);
                 return json!({ "value": state.force_game_mode });
+            }
+            "serversettings/player_idle_timeout" => {
+                return json!({ "value": state.lists.lock().unwrap().player_idle_timeout });
+            }
+            "serversettings/player_idle_timeout/set" => {
+                let Some(minutes) = body["value"]
+                    .as_i64()
+                    .and_then(|value| i32::try_from(value).ok())
+                else {
+                    return json!({ "error": "player idle timeout must be an integer" });
+                };
+                rpc(format!(
+                    "Update player idle timeout from {} minutes to {} minutes",
+                    state.lists.lock().unwrap().player_idle_timeout,
+                    minutes
+                ));
+                self.set_player_idle_timeout(&state.lists.clone(), minutes);
+                return json!({ "value": state.lists.lock().unwrap().player_idle_timeout });
             }
             "serversettings/max_players" => {
                 return json!({ "value": state.max_players });

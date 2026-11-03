@@ -16,7 +16,7 @@ use std::{
     io::{self, Read, Write},
     net::{Shutdown, SocketAddr, TcpListener, TcpStream},
     sync::{
-        Arc, Mutex,
+        Arc, Mutex, MutexGuard,
         atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
         mpsc::{Receiver, RecvTimeoutError, Sender, SyncSender, channel, sync_channel},
     },
@@ -178,6 +178,14 @@ struct State {
     stop: AtomicBool,
 }
 
+/// The state behind `mutex`, even if a connection's thread panicked holding it: one bad connection
+/// must not make every later one panic too.
+fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 #[derive(Clone)]
 pub struct Relay {
     state: Arc<State>,
@@ -271,7 +279,7 @@ impl Relay {
 
 fn counts(s: &State) -> Counts {
     Counts {
-        hosts: s.inner.lock().unwrap().hosts.len(),
+        hosts: locked(&s.inner).hosts.len(),
         bridges: s.bridges.load(Ordering::Relaxed),
         registrations: s.registrations.load(Ordering::Relaxed),
         joins: s.joins.load(Ordering::Relaxed),
@@ -384,14 +392,14 @@ fn host(
     game: String,
 ) -> io::Result<()> {
     let now = Instant::now();
-    if !state.limiter.lock().unwrap().allow_register(peer.ip(), now) {
+    if !locked(&state.limiter).allow_register(peer.ip(), now) {
         state.rate_limited.fetch_add(1, Ordering::Relaxed);
         return refuse(&mut stream, ErrorCode::RateLimited);
     }
     let (tx, rx) = channel();
     let token = random_token();
     let nameplate = {
-        let mut inner = state.inner.lock().unwrap();
+        let mut inner = locked(&state.inner);
         let kept = state.config.ended_kept;
         inner
             .ended
@@ -426,7 +434,7 @@ fn host(
     state.registrations.fetch_add(1, Ordering::Relaxed);
     let result = serve_host(state, &mut stream, peer, &nameplate, &token, tx, rx);
     {
-        let mut inner = state.inner.lock().unwrap();
+        let mut inner = locked(&state.inner);
         if inner
             .hosts
             .get(&nameplate)
@@ -496,8 +504,8 @@ fn join(
     state.joins.fetch_add(1, Ordering::Relaxed);
     // The global budget for unknown codes is checked before the lookup, so a
     // refusal says nothing about whether the nameplate exists.
-    let allowed = state.limiter.lock().unwrap().allow_join(peer.ip(), now)
-        && state.global_unknown.lock().unwrap().has(now);
+    let allowed =
+        locked(&state.limiter).allow_join(peer.ip(), now) && locked(&state.global_unknown).has(now);
     if !allowed {
         state.rate_limited.fetch_add(1, Ordering::Relaxed);
         return refuse(&mut stream, ErrorCode::RateLimited);
@@ -508,7 +516,7 @@ fn join(
     let session = random_u64();
     let (atx, arx) = sync_channel(1);
     let lookup = {
-        let mut inner = state.inner.lock().unwrap();
+        let mut inner = locked(&state.inner);
         let ended = inner
             .ended
             .get(&nameplate)
@@ -539,8 +547,8 @@ fn join(
         Lookup::Found(tx) => tx,
         Lookup::Unknown => {
             state.unknown.fetch_add(1, Ordering::Relaxed);
-            state.limiter.lock().unwrap().unknown(peer.ip(), now);
-            state.global_unknown.lock().unwrap().try_take(now);
+            locked(&state.limiter).unknown(peer.ip(), now);
+            locked(&state.global_unknown).try_take(now);
             return refuse(&mut stream, ErrorCode::UnknownCode);
         }
         Lookup::Ended => return refuse(&mut stream, ErrorCode::Ended),
@@ -558,7 +566,7 @@ fn join(
     let _ = to_host.send(Out::Line(FromRelay::Join { session }));
     let attached = arx.recv_timeout(state.config.attach_wait);
     {
-        let mut inner = state.inner.lock().unwrap();
+        let mut inner = locked(&state.inner);
         inner.pending.remove(&session);
         if let Some(h) = inner.hosts.get_mut(&nameplate) {
             h.pending = h.pending.saturating_sub(1);
@@ -578,7 +586,7 @@ fn attach(
     token: &str,
 ) -> io::Result<()> {
     let target = {
-        let inner = state.inner.lock().unwrap();
+        let inner = locked(&state.inner);
         inner
             .pending
             .get(&session)
@@ -655,7 +663,7 @@ fn copy(state: &State, mut from: TcpStream, mut to: TcpStream) {
         let now = Instant::now();
         let wait = bucket
             .take(n as f64, now)
-            .max(state.total.lock().unwrap().take(n as f64, now));
+            .max(locked(&state.total).take(n as f64, now));
         if !wait.is_zero() {
             std::thread::sleep(wait);
         }
@@ -671,6 +679,19 @@ fn copy(state: &State, mut from: TcpStream, mut to: TcpStream) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_poisoned_lock_still_opens() {
+        let mutex = Arc::new(Mutex::new(7));
+        let held = mutex.clone();
+        let _ = std::thread::spawn(move || {
+            let _guard = held.lock().unwrap();
+            panic!("a connection's thread panics holding the lock");
+        })
+        .join();
+        assert!(mutex.is_poisoned());
+        assert_eq!(*locked(&mutex), 7);
+    }
 
     #[test]
     fn mapped_addresses_become_ipv4() {

@@ -505,6 +505,23 @@ impl Codec<RecipeBookSettings> for RecipeBookSettings {
     }
 }
 
+/// ServerboundRecipeBookSeenRecipePacket: the `RecipeDisplayId` the player
+/// has looked at, so the server stops treating it as a new one.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RecipeBookSeenRecipe {
+    pub recipe: i32,
+}
+impl Codec<RecipeBookSeenRecipe> for RecipeBookSeenRecipe {
+    fn read(r: &mut Reader) -> Result<Self> {
+        Ok(Self {
+            recipe: r.varint()?,
+        })
+    }
+    fn write(v: &Self, w: &mut Writer) {
+        w.varint(v.recipe);
+    }
+}
+
 /// ServerboundRecipeBookChangeSettingsPacket: the active book's open and
 /// filtering flags, with its `RecipeBookType` ordinal as a VarInt.
 #[derive(Clone, Debug, PartialEq)]

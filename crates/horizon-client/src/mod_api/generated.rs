@@ -3552,12 +3552,16 @@ pub trait Hooks: Send + Sync {
     }
     /// A player was saved to the world's store (NeoForge's
     /// `PlayerEvent.SaveToFile`, `PlayerList.save`): when they leave or the
-    /// world closes, when the dedicated server saves everyone, and for an
-    /// integrated server's owner when the world saves them. LAN guests are
-    /// not heard on integrated autosaves. Once for each save. `directory`
+    /// world closes, when a dedicated or integrated server saves its guests,
+    /// and for an integrated server's owner when the world saves them.
+    /// Once for each save. `directory`
     /// is the world's player directory (`players/data`): write your own file
     /// there, named `<uuid>.<suffix>`, never the player's `.dat`. The player
     /// may be leaving, so no player's state is swapped in. Not cancellable.
+    /// Autosave snapshots are written asynchronously: this notification runs
+    /// on a later server tick after a successful write, possibly after WorldSaved.
+    /// Live state may have advanced beyond the saved snapshot; a process exit
+    /// before completions are drained can prevent notification delivery.
     fn player_save_to_file(&self, host: &mut dyn Host, event: &mut PlayerSaveToFileEvent<'_>) {
         let _ = host;
         let _ = event;
@@ -4523,6 +4527,38 @@ pub trait Hooks: Send + Sync {
         let _ = event;
         Flow::Continue
     }
+    /// Two animals bred and a baby is about to be made (NeoForge's
+    /// `BabyEntitySpawnEvent`, vanilla's `Animal.spawnChildFromBreeding`):
+    /// `parent` and `partner` are entity ids, `player` the UUID of the
+    /// player who fed them into love (0 when none), `kind` the baby's type
+    /// (a horse and a donkey have a mule). Set `cancel` for no baby: the
+    /// parents still rest and lose their love (their ages were already set
+    /// to 6000), but there is no baby, no experience, no `animals_bred`
+    /// statistic, no advancement and no heart particles, as NeoForge
+    /// returns before `finalizeSpawnChildFromBreeding`. Not fired for
+    /// turtles, frogs and sniffers (an egg, no baby), villagers or
+    /// armadillos' own paths. On the server. API @API:baby_entity_spawn@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn baby_entity_spawn(&self, host: &mut dyn Host, event: &mut BabyEntitySpawnEvent<'_>) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+    /// A server player tries to sleep in the bed whose head is at `pos`
+    /// (NeoForge's `CanPlayerSleepEvent`, vanilla's `ServerPlayer.startSleepInBed`).
+    /// `problem` is what vanilla found, first problem only: `too_far_away`,
+    /// `obstructed`, `not_possible_now` (not night or thunder, the bed rule),
+    /// `not_safe` (monsters near), or `None`. A mod may set `None` to let the
+    /// player sleep anyway, or one of those names (`other_problem` refuses
+    /// without a message) to refuse. The spawn point is set before it fires,
+    /// as in vanilla, only when vanilla found no problem. After it,
+    /// `native_player_bed_enter` still fires and may cancel. Server-side.
+    /// API @API:can_player_sleep@.
+    fn can_player_sleep(&self, host: &mut dyn Host, event: &mut CanPlayerSleepEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
     /// Player FOV scale, after vanilla effects and before zoom and easing.
     /// Invalid values or values outside 0.01..=10 revert to base. API @API:compute_fov_modifier@.
     fn compute_fov_modifier(&self, host: &dyn Host, event: &mut ComputeFovModifierEvent<'_>) {
@@ -4542,6 +4578,15 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event;
     }
+    /// A mod's own ingredient kind, matching a concrete stack at craft time:
+    /// the ingredient's `test` calls here with the kind, its JSON and the
+    /// stack being matched, `accept` already true (the load-time list named
+    /// the item). Set `accept` to false to refuse the stack — its components
+    /// are the usual reason. The hook may be called many times a craft; the
+    /// answer must be the same for the same stack. API @API:ingredient_test@.
+    fn ingredient_test(&self, event: &mut IngredientTestEvent<'_>) {
+        let _ = event;
+    }
     /// Item `item` (`mod_id:name`) holds items (`Capabilities.Item.ITEM`): set
     /// `slots` when the item is yours, for a backpack, a storage cell or a
     /// toolbox. Clamped to 1..=256, `ItemContainerContents`' limit; 0 leaves
@@ -4558,6 +4603,61 @@ pub trait Hooks: Send + Sync {
         let _ = event;
         None
     }
+    /// Client-side evaluation of a mod's namespaced conditional item model property.
+    /// Set value only for a property your mod owns; unhandled properties stay false.
+    /// The borrowed stack is the one being resolved, including nested bundle items.
+    fn item_model_property(&self, host: &dyn Host, event: &mut ItemModelPropertyEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A mob converted into another type (NeoForge's
+    /// `LivingConversionEvent.Post`): `entity` is gone, `converted` took its
+    /// place. Fires with `native_entity_transform`, after the new mob joined
+    /// the level, for the conversions `native_living_conversion_pre` tells.
+    /// API @API:living_conversion_post@.
+    fn living_conversion_post(
+        &self,
+        host: &mut dyn Host,
+        event: &mut LivingConversionPostEvent<'_>,
+    ) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A mob is about to convert into another type (NeoForge's
+    /// `LivingConversionEvent.Pre`, vanilla's `Mob.convertTo`): a zombie
+    /// drowning, a piglin or hoglin in the Overworld, a tadpole growing, a
+    /// mooshroom sheared by a dispenser, a pig or villager struck by
+    /// lightning. `outcome` is the new type. Set `cancel` to keep the mob as
+    /// it is; a drowning zombie starts its timers again. Not told: a
+    /// mooshroom a player shears, a zombie villager's cure, a villager turned
+    /// by a zombie. API @API:living_conversion_pre@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn living_conversion_pre(
+        &self,
+        host: &mut dyn Host,
+        event: &mut LivingConversionPreEvent<'_>,
+    ) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+    /// A mob or server player is about to die (NeoForge's `LivingDeathEvent`,
+    /// vanilla's `LivingEntity.die`): its health has run out, and the loot,
+    /// experience and death message have not run. `entity` is its id and
+    /// `kind` its type (`minecraft:zombie`, `minecraft:player`); `damage_type`
+    /// names the last blow (`minecraft:player_attack`) and `attacker` is the
+    /// mob that dealt it, 0 for none or a player. Set `cancel` to keep it alive:
+    /// Horizon decides death by health, so it stays at 1 health. The hook
+    /// fires once per death attempt. Armor stands, boats and other non-mob
+    /// entities are not told. API @API:living_death@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn living_death(&self, host: &mut dyn Host, event: &mut LivingDeathEvent<'_>) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
     /// `LivingEntity.getProjectile(weapon)` (NeoForge's
     /// `LivingGetProjectileEvent`) for a player (`player` and `name`) or a
     /// mob (`entity`, `kind`): a skeleton or illusioner's shot, or the crossbow
@@ -4570,8 +4670,114 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event;
     }
+    /// A player's weapon hit on a mob, before `Mob::damage_with` borrows the
+    /// victim: melee, sweep and spear hits, including LAN guests. Unlike v1,
+    /// this has a host and snapshots of the weapon, victim position/view and
+    /// DamageSource position. The acting player's network id is `causing`
+    /// (also the direct entity). Weapon enchantments include their levels.
+    /// Runs after the victim's invulnerability check (an invulnerable or dead victim fires nothing) and before v1; cancellation refuses
+    /// delivery. Other damage routes still only fire v1. API @API:living_incoming_damage_v2@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `canceled`, and later mods are skipped.
+    fn living_incoming_damage_v2(
+        &self,
+        host: &mut dyn Host,
+        event: &mut LivingIncomingDamageV2Event<'_>,
+    ) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+    /// LivingEntity.knockback before resistance and motion, after the unchanged v1 hook.
+    /// Cancellation from either hook wins. Attacker is the attacking entity's network id,
+    /// falling back to the victim's last hurt-by mob, or 0 when unknown; `attacker_main` and
+    /// `attacker_off` are what it holds (a player's selected and off-hand stacks, a mob's main hand), none when unknown. Player attackers
+    /// include the guest whose action runs. Includes mob melee and armor-stand sweeps, not
+    /// direct velocity pushes (explosions, Punch arrows, hoglin throws). Non-finite changes
+    /// are restored before resistance. Server-side, without self: damage borrows the victim.
+    /// API @API:living_knockback_v2@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `canceled`, and later mods are skipped.
+    fn living_knockback_v2(&self, event: &mut LivingKnockbackV2Event<'_>) -> Flow {
+        let _ = event;
+        Flow::Continue
+    }
+    /// A slime or magma cube is dying and about to split into smaller ones
+    /// (NeoForge's `MobSplitEvent`, vanilla's `Slime.remove`): `parent` is
+    /// its entity id, `kind` its type, `size` its size, `child_size` the
+    /// size of the children (half of it) and `count` how many vanilla drew
+    /// (2 to 4). A mod may change `count` (0 spawns none, at most 64) or set
+    /// `cancel` to spawn no children. Only for a parent above size 1; the
+    /// split's random draw is made first. On the server. API @API:mob_split@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn mob_split(&self, host: &mut dyn Host, event: &mut MobSplitEvent<'_>) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
     /// Local player movement input, after reading it and before applying it.
     fn movement_input(&self, host: &dyn Host, event: &mut MovementInputEvent) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A player is tuning a note block on the authoritative server, not in
+    /// client prediction. `context` gives its dimension, position, instrument
+    /// and old note; `new_note` starts as vanilla's cycled note. Set it to 0
+    /// through 24; an out-of-range value keeps vanilla's. Cancel to leave the
+    /// note unchanged and prevent playback. API @API:native_note_block_change@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn note_block_change(
+        &self,
+        level: &dyn LevelHost,
+        event: &mut NoteBlockChangeEvent<'_>,
+    ) -> Flow {
+        let _ = level;
+        let _ = event;
+        Flow::Continue
+    }
+    /// Possible natural spawns at a server position (NeoForge's
+    /// `LevelEvent.PotentialSpawns`, `NaturalSpawner.mobsAt`). Mods may add or
+    /// remove entries, or cancel to make the list empty.
+    /// @API:native_potential_spawns@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `canceled`, and later mods are skipped.
+    fn potential_spawns(&self, host: &dyn Host, event: &mut PotentialSpawnsEvent<'_>) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+    /// A village siege found a spawn position on the server. Set `canceled`
+    /// to stop the siege. There is one siege per dimension.
+    /// @API:native_village_siege@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `canceled`, and later mods are skipped.
+    fn village_siege(&self, host: &mut dyn Host, event: &mut VillageSiegeEvent<'_>) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+    /// A server player's experience points are about to change through
+    /// `Player.giveExperiencePoints` (NeoForge's `PlayerXpEvent.XpChange`): an
+    /// orb pickup after mending, an advancement reward, or `/xp add ... points`.
+    /// Change `amount` (in points) or set `cancel` to give nothing. An orb or
+    /// an advancement reward gives nothing for a negative amount. Experience
+    /// bottles and furnaces make orbs, so they come through the orb path.
+    /// `native_player_exp_change` is separate and still fires first for an orb
+    /// pickup. Server-side. API @API:player_xp_change@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn player_xp_change(&self, host: &mut dyn Host, event: &mut PlayerXpChangeEvent<'_>) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+    /// Declare categories for custom recipe types, with registered item icons.
+    /// Asked lazily once per recipe table by `native_recipe_book_category`.
+    /// Invalid declarations are logged and skipped; the first valid category
+    /// owns its id and type. This does not yet add tabs or book displays.
+    fn recipe_book_categories(&self, host: &dyn Host, event: &mut RecipeBookCategoriesEvent<'_>) {
         let _ = host;
         let _ = event;
     }
@@ -13943,6 +14149,65 @@ pub fn dispatch_arrow_nock(
         }
     }
 }
+/// What [`Hooks::baby_entity_spawn`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct BabyEntitySpawnEvent<'a> {
+    pub parent: u32,
+    pub partner: u32,
+    pub player: u128,
+    pub kind: &'a str,
+}
+pub fn dispatch_baby_entity_spawn(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    parent: u32,
+    partner: u32,
+    player: u128,
+    kind: &str,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = BabyEntitySpawnEvent {
+        parent,
+        partner,
+        player,
+        kind,
+    };
+    for mod_hook in super::entered(mods, "baby_entity_spawn") {
+        if matches!(mod_hook.baby_entity_spawn(host, &mut event), Flow::Cancel) {
+            *cancel = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::can_player_sleep`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct CanPlayerSleepEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub pos: [i32; 3],
+    pub problem: &'a mut Option<String>,
+}
+pub fn dispatch_can_player_sleep(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    pos: [i32; 3],
+    problem: &mut Option<String>,
+) {
+    let mut event = CanPlayerSleepEvent {
+        player,
+        name,
+        pos,
+        problem,
+    };
+    for mod_hook in super::entered(mods, "can_player_sleep") {
+        mod_hook.can_player_sleep(host, &mut event);
+    }
+}
 /// What [`Hooks::compute_fov_modifier`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
 pub struct ComputeFovModifierEvent<'a> {
@@ -13996,6 +14261,32 @@ pub fn dispatch_explosion_knockback(
         mod_hook.explosion_knockback(host, &mut event);
     }
 }
+/// What [`Hooks::ingredient_test`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct IngredientTestEvent<'a> {
+    pub kind: &'a str,
+    pub data: &'a serde_json::Map<String, Value>,
+    pub stack: &'a ItemStack,
+    pub accept: bool,
+}
+pub fn dispatch_ingredient_test(
+    mods: &[Box<dyn Hooks>],
+    kind: &str,
+    data: &serde_json::Map<String, Value>,
+    stack: &ItemStack,
+    accept: &mut bool,
+) {
+    let mut event = IngredientTestEvent {
+        kind,
+        data,
+        stack,
+        accept: *accept,
+    };
+    for mod_hook in super::entered(mods, "ingredient_test") {
+        mod_hook.ingredient_test(&mut event);
+    }
+    *accept = event.accept;
+}
 /// What [`Hooks::item_container`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
 pub struct ItemContainerEvent<'a> {
@@ -14014,6 +14305,122 @@ pub fn dispatch_item_container(
     for mod_hook in super::entered(mods, "item_container") {
         if let Some(replacement) = mod_hook.item_container(host, &mut event) {
             *slots = Some(replacement);
+            break;
+        }
+    }
+}
+/// What [`Hooks::item_model_property`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ItemModelPropertyEvent<'a> {
+    pub property: &'a str,
+    pub stack: &'a StackView,
+    pub value: bool,
+}
+pub fn dispatch_item_model_property(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    property: &str,
+    stack: &StackView,
+    value: &mut bool,
+) {
+    let mut event = ItemModelPropertyEvent {
+        property,
+        stack,
+        value: *value,
+    };
+    for mod_hook in super::entered(mods, "item_model_property") {
+        mod_hook.item_model_property(host, &mut event);
+    }
+    *value = event.value;
+}
+/// What [`Hooks::living_conversion_post`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct LivingConversionPostEvent<'a> {
+    pub entity: u32,
+    pub kind: &'a str,
+    pub converted: u32,
+    pub converted_kind: &'a str,
+}
+pub fn dispatch_living_conversion_post(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    entity: u32,
+    kind: &str,
+    converted: u32,
+    converted_kind: &str,
+) {
+    let mut event = LivingConversionPostEvent {
+        entity,
+        kind,
+        converted,
+        converted_kind,
+    };
+    for mod_hook in super::entered(mods, "living_conversion_post") {
+        mod_hook.living_conversion_post(host, &mut event);
+    }
+}
+/// What [`Hooks::living_conversion_pre`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct LivingConversionPreEvent<'a> {
+    pub entity: u32,
+    pub kind: &'a str,
+    pub outcome: &'a str,
+}
+pub fn dispatch_living_conversion_pre(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    entity: u32,
+    kind: &str,
+    outcome: &str,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = LivingConversionPreEvent {
+        entity,
+        kind,
+        outcome,
+    };
+    for mod_hook in super::entered(mods, "living_conversion_pre") {
+        if matches!(
+            mod_hook.living_conversion_pre(host, &mut event),
+            Flow::Cancel
+        ) {
+            *cancel = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::living_death`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct LivingDeathEvent<'a> {
+    pub entity: u32,
+    pub kind: &'a str,
+    pub damage_type: &'a str,
+    pub attacker: u32,
+}
+pub fn dispatch_living_death(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    entity: u32,
+    kind: &str,
+    damage_type: &str,
+    attacker: u32,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = LivingDeathEvent {
+        entity,
+        kind,
+        damage_type,
+        attacker,
+    };
+    for mod_hook in super::entered(mods, "living_death") {
+        if matches!(mod_hook.living_death(host, &mut event), Flow::Cancel) {
+            *cancel = true;
             break;
         }
     }
@@ -14050,6 +14457,142 @@ pub fn dispatch_living_get_projectile(
         mod_hook.living_get_projectile(host, &mut event);
     }
 }
+/// What [`Hooks::living_incoming_damage_v2`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct LivingIncomingDamageV2Event<'a> {
+    pub entity: i32,
+    pub kind: &'a str,
+    pub damage_type: &'a str,
+    pub causing: i32,
+    pub source_position: Option<[f64; 3]>,
+    pub victim_position: [f64; 3],
+    pub victim_view: [f64; 3],
+    pub weapon: Option<&'a ItemStack>,
+    pub amount: f32,
+}
+pub fn dispatch_living_incoming_damage_v2(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    entity: i32,
+    kind: &str,
+    damage_type: &str,
+    causing: i32,
+    source_position: Option<[f64; 3]>,
+    victim_position: [f64; 3],
+    victim_view: [f64; 3],
+    weapon: Option<&ItemStack>,
+    amount: &mut f32,
+    canceled: &mut bool,
+) {
+    if *canceled {
+        return;
+    }
+    let mut event = LivingIncomingDamageV2Event {
+        entity,
+        kind,
+        damage_type,
+        causing,
+        source_position,
+        victim_position,
+        victim_view,
+        weapon,
+        amount: *amount,
+    };
+    for mod_hook in super::entered(mods, "living_incoming_damage_v2") {
+        if matches!(
+            mod_hook.living_incoming_damage_v2(host, &mut event),
+            Flow::Cancel
+        ) {
+            *canceled = true;
+            break;
+        }
+    }
+    *amount = event.amount;
+}
+/// What [`Hooks::living_knockback_v2`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct LivingKnockbackV2Event<'a> {
+    pub entity: i32,
+    pub kind: &'a str,
+    pub attacker: i32,
+    pub attacker_main: Option<&'a ItemStack>,
+    pub attacker_off: Option<&'a ItemStack>,
+    pub strength: f64,
+    pub x: f64,
+    pub z: f64,
+}
+pub fn dispatch_living_knockback_v2(
+    mods: &[Box<dyn Hooks>],
+    entity: i32,
+    kind: &str,
+    attacker: i32,
+    attacker_main: Option<&ItemStack>,
+    attacker_off: Option<&ItemStack>,
+    strength: &mut f64,
+    x: &mut f64,
+    z: &mut f64,
+    canceled: &mut bool,
+) {
+    if *canceled {
+        return;
+    }
+    let mut event = LivingKnockbackV2Event {
+        entity,
+        kind,
+        attacker,
+        attacker_main,
+        attacker_off,
+        strength: *strength,
+        x: *x,
+        z: *z,
+    };
+    for mod_hook in super::entered(mods, "living_knockback_v2") {
+        if matches!(mod_hook.living_knockback_v2(&mut event), Flow::Cancel) {
+            *canceled = true;
+            break;
+        }
+    }
+    *strength = event.strength;
+    *x = event.x;
+    *z = event.z;
+}
+/// What [`Hooks::mob_split`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct MobSplitEvent<'a> {
+    pub parent: u32,
+    pub kind: &'a str,
+    pub size: i32,
+    pub child_size: i32,
+    pub count: u32,
+}
+pub fn dispatch_mob_split(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    parent: u32,
+    kind: &str,
+    size: i32,
+    child_size: i32,
+    count: &mut u32,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = MobSplitEvent {
+        parent,
+        kind,
+        size,
+        child_size,
+        count: *count,
+    };
+    for mod_hook in super::entered(mods, "mob_split") {
+        if matches!(mod_hook.mob_split(host, &mut event), Flow::Cancel) {
+            *cancel = true;
+            break;
+        }
+    }
+    *count = event.count;
+}
 /// What [`Hooks::movement_input`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
 pub struct MovementInputEvent {
@@ -14079,6 +14622,143 @@ pub fn dispatch_movement_input(
     *strafe = event.strafe;
     *jump = event.jump;
     *sneak = event.sneak;
+}
+/// What [`Hooks::note_block_change`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct NoteBlockChangeEvent<'a> {
+    pub context: &'a NativeNoteBlockChange<'a>,
+    pub new_note: i32,
+}
+pub fn dispatch_note_block_change(
+    level: &dyn LevelHost,
+    mods: &[Box<dyn Hooks>],
+    context: &NativeNoteBlockChange<'_>,
+    new_note: &mut i32,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = NoteBlockChangeEvent {
+        context,
+        new_note: *new_note,
+    };
+    for mod_hook in super::entered(mods, "note_block_change") {
+        if matches!(mod_hook.note_block_change(level, &mut event), Flow::Cancel) {
+            *cancel = true;
+            break;
+        }
+    }
+    *new_note = event.new_note;
+}
+/// What [`Hooks::potential_spawns`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PotentialSpawnsEvent<'a> {
+    pub dimension: &'a str,
+    pub category: &'a str,
+    pub pos: [i32; 3],
+    pub entries: &'a mut Vec<SpawnEntry>,
+}
+pub fn dispatch_potential_spawns(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    dimension: &str,
+    category: &str,
+    pos: [i32; 3],
+    entries: &mut Vec<SpawnEntry>,
+    canceled: &mut bool,
+) {
+    if *canceled {
+        return;
+    }
+    let mut event = PotentialSpawnsEvent {
+        dimension,
+        category,
+        pos,
+        entries,
+    };
+    for mod_hook in super::entered(mods, "potential_spawns") {
+        if matches!(mod_hook.potential_spawns(host, &mut event), Flow::Cancel) {
+            *canceled = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::village_siege`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct VillageSiegeEvent<'a> {
+    pub dimension: &'a str,
+    pub player: u128,
+    pub attempted_pos: [f64; 3],
+}
+pub fn dispatch_village_siege(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    dimension: &str,
+    player: u128,
+    attempted_pos: [f64; 3],
+    canceled: &mut bool,
+) {
+    if *canceled {
+        return;
+    }
+    let mut event = VillageSiegeEvent {
+        dimension,
+        player,
+        attempted_pos,
+    };
+    for mod_hook in super::entered(mods, "village_siege") {
+        if matches!(mod_hook.village_siege(host, &mut event), Flow::Cancel) {
+            *canceled = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::player_xp_change`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerXpChangeEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub amount: i32,
+}
+pub fn dispatch_player_xp_change(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    amount: &mut i32,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = PlayerXpChangeEvent {
+        player,
+        name,
+        amount: *amount,
+    };
+    for mod_hook in super::entered(mods, "player_xp_change") {
+        if matches!(mod_hook.player_xp_change(host, &mut event), Flow::Cancel) {
+            *cancel = true;
+            break;
+        }
+    }
+    *amount = event.amount;
+}
+/// What [`Hooks::recipe_book_categories`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct RecipeBookCategoriesEvent<'a> {
+    pub categories: &'a mut Vec<RecipeBookCategory>,
+}
+pub fn dispatch_recipe_book_categories(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    categories: &mut Vec<RecipeBookCategory>,
+) {
+    let mut event = RecipeBookCategoriesEvent { categories };
+    for mod_hook in super::entered(mods, "recipe_book_categories") {
+        mod_hook.recipe_book_categories(host, &mut event);
+    }
 }
 /// What [`Hooks::render_hand_pose`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]

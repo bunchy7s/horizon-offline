@@ -430,6 +430,10 @@ impl ConnReader {
         let n = match self.stream.read(&mut self.buffer[self.end..]) {
             Ok(0) => return Err(Error::end_of_stream()),
             Ok(n) => n,
+            // A signal (a profiler attaching, SIGCHLD...) cut the read short
+            // before any byte came: nothing is wrong with the connection, the
+            // caller reads again.
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => return Ok(()),
             // The read timeout passed: Windows reports TimedOut, Unix
             // WouldBlock.
             Err(e)

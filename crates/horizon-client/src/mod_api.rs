@@ -5,7 +5,8 @@
 //! Generate the trait and dispatch with `cargo run -p xtask -- mod-api`.
 use std::sync::{Arc, OnceLock};
 
-pub use crate::biome::BiomeColors;
+pub use crate::biome::{BiomeColors, SpawnEntry};
+pub use crate::block_sprites::{BlockSprites, FaceSprite, SpriteRef};
 pub use crate::camera::{CameraEntity, FovPlayer};
 pub use crate::command::Suggestion;
 pub use crate::containers::{ModBlockEntity, ModContainer, ModEnergyBuffer, ModFluidTanks};
@@ -22,22 +23,26 @@ pub use crate::game::{
     NativePlayerRender, NativeShake,
 };
 pub use crate::gfx::native_render::{
-    RenderHooks, RenderNeeds, RenderNeedsEvent, WorldDrawn, WorldDrawnEvent, wgpu,
+    BlockSpriteArrays, RenderHooks, RenderNeeds, RenderNeedsEvent, WorldDrawn, WorldDrawnEvent,
+    wgpu,
 };
 pub use crate::hud::HudBatch;
 pub use crate::hud_layout::{GuiDraw, HealthInputs};
 pub use crate::items::ItemStack;
 pub use crate::merchant::MerchantOffer;
+pub use crate::mesher::TintSource;
 pub use crate::music::{Music, MusicLayer};
 pub use crate::particles::{ParticleOptions, ParticleType};
+pub use crate::recipe_book::RecipeBookCategory;
 pub use crate::text::Text;
-pub use horizon_assets::item_model::DisplayContext;
+pub use horizon_assets::item_model::{DisplayContext, StackView};
 pub use horizon_core::{
     geometry::Direction,
     position::BlockPos,
     random::{LegacyRandom, RandomSource},
 };
 pub use horizon_world::consumable::UseAnimation;
+pub use horizon_world::player_inventory::EquipmentSlot;
 pub use horizon_world::{
     attachments::{
         AttachmentCodec, AttachmentError, AttachmentHost, AttachmentType, Attachments, Holder,
@@ -75,6 +80,16 @@ pub struct NativeCamera {
 /// A dispenser hook's answer: the slot's remainder (None empties it) and the
 /// level event to play, `CLICK` (1000), `FAIL` (1001) or 0 for none.
 pub type NativeDispensed = (Option<ItemStack>, i32);
+
+/// Context for a player tuning a note block.
+#[derive(Clone, Copy, Debug)]
+pub struct NativeNoteBlockChange<'a> {
+    pub dimension: LevelDimension,
+    pub pos: BlockPos,
+    pub instrument: &'a str,
+    /// The note before tuning, in the range 0 through 24.
+    pub old_note: i32,
+}
 
 /// What dropped the items heard by the `loot_drops` hook.
 #[derive(Clone, Copy, Debug)]
@@ -384,6 +399,36 @@ impl EntityRef {
     /// The open of the world the handle belongs to.
     pub fn epoch(self) -> NativeWorldEpoch {
         self.epoch
+    }
+}
+
+/// A living entity of the open world: a mob, a player, an armor stand or the
+/// dragon (vanilla's `LivingEntity`). `host.living(entity)` makes one from an
+/// [`EntityRef`] of such an entity, and [`LivingRef::entity`] goes back, so the
+/// entity's methods work on it too. Stale handles read as `None`, as an
+/// `EntityRef`'s do.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct LivingRef(EntityRef);
+
+impl LivingRef {
+    /// Create a handle for the game.
+    #[doc(hidden)]
+    pub fn new(entity: EntityRef) -> Self {
+        Self(entity)
+    }
+    /// The same entity as an [`EntityRef`].
+    pub fn entity(self) -> EntityRef {
+        self.0
+    }
+    /// The entity's id (the network id events carry).
+    pub fn id(self) -> u32 {
+        self.0.id()
+    }
+}
+
+impl From<LivingRef> for EntityRef {
+    fn from(living: LivingRef) -> Self {
+        living.0
     }
 }
 
@@ -736,6 +781,85 @@ mod tests {
             let told: Vec<String> = host.lines.iter().map(Text::plain).collect();
             assert_eq!(told, [block], "{block}");
         }
+    }
+
+    struct Backstab;
+
+    impl Hooks for Backstab {
+        fn living_incoming_damage_v2(
+            &self,
+            host: &mut dyn Host,
+            event: &mut LivingIncomingDamageV2Event<'_>,
+        ) -> Flow {
+            assert_eq!(event.causing, 7);
+            assert_eq!(event.kind, "minecraft:zombie");
+            assert_eq!(event.damage_type, "minecraft:player_attack");
+            if event.entity == 0 {
+                return Flow::Cancel;
+            }
+            let from = event.source_position.unwrap();
+            let behind = (0..3)
+                .map(|axis| (from[axis] - event.victim_position[axis]) * event.victim_view[axis])
+                .sum::<f64>()
+                < 0.0;
+            if behind {
+                let weapon = event.weapon.unwrap();
+                let level = weapon.enchantment_level("probe:backstab");
+                assert_eq!(weapon.enchantments().len(), 1);
+                event.amount *= level as f32;
+                let player = host.acting_player().unwrap();
+                host.action_bar(player.uuid, Text::literal("backstab"));
+            }
+            Flow::Continue
+        }
+    }
+
+    #[test]
+    fn damage_v2_exposes_weapon_geometry_and_host_without_changing_v1() {
+        let mods = [Box::new(Backstab) as Box<dyn Hooks>];
+        let mut weapon = stick();
+        weapon.enchant("probe:backstab", 3);
+        for (entity, source_z, expected, canceled_expected) in [
+            (1, -1.0, 12.0, false),
+            (1, 1.0, 4.0, false),
+            (0, -1.0, 4.0, true),
+        ] {
+            let mut host = Reader {
+                block: "minecraft:air",
+                lines: Vec::new(),
+            };
+            let mut amount = 4.0;
+            let mut canceled = false;
+            dispatch_living_incoming_damage_v2(
+                &mut host,
+                &mods,
+                entity,
+                "minecraft:zombie",
+                "minecraft:player_attack",
+                7,
+                Some([0.0, 0.0, source_z]),
+                [0.0; 3],
+                [0.0, 0.0, 1.0],
+                Some(&weapon),
+                &mut amount,
+                &mut canceled,
+            );
+            assert_eq!((amount, canceled), (expected, canceled_expected));
+            assert_eq!(host.lines.len(), usize::from(expected == 12.0));
+        }
+        let mut amount = 4.0;
+        let mut canceled = false;
+        dispatch_living_incoming_damage(
+            &mods,
+            1,
+            "minecraft:zombie",
+            "minecraft:player_attack",
+            7,
+            7,
+            &mut amount,
+            &mut canceled,
+        );
+        assert_eq!((amount, canceled), (4.0, false));
     }
 
     #[test]
