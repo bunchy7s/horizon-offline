@@ -2464,6 +2464,10 @@ pub fn do_hurt_target(m: &mut Mob, who: Who, cx: &mut Cx) {
     if super::creaking::is_creaking(m) {
         m.voice("entity.creaking.attack", cx.events);
     }
+    // Rabbit.playAttackSound: only the killer bunny.
+    if m.species() == Species::Rabbit {
+        super::rabbit::attack_sound(m, cx.events);
+    }
     // Panda.playAttackSound: playSound(PANDA_BITE, 1.0, 1.0).
     if m.species() == Species::Panda && !m.silent {
         let at = [m.position.x, m.position.y, m.position.z];
