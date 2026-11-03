@@ -12187,5 +12187,92 @@ CHECKS += ['datapack-recipe']
 CHECK_FNS['datapack-recipe'] = check_datapack_recipe
 
 
+def check_damage_attacker(host, guest, out):
+    """Connected causing players survive /damage and /execute on attacker.
+
+    Scoreboard writes observe whether a relation actually ran; selector feedback
+    wording and the warden's sonic behavior are outside this check.
+    """
+    objective = 'h059_attacker'
+    positions = [(g, pos_of(g)) for g in (host, guest)]
+    seen = {}
+    for g in (host, guest):
+        g('command', command='gamemode creative')
+    host('command', command='forceload add 0 0')
+    for g in (host, guest):
+        g('command', command='tp @s 8.5 230 8.5')
+    guest.wait(20)
+    host('command', command='tick freeze')
+    host('command', command=f'scoreboard objectives add {objective} dummy')
+
+    def game_time():
+        line = server_reply(host, 'time query gametime', 'time is')
+        return int(re.search(r'time is (\d+)', line).group(1))
+
+    def relations(observer, target, serial):
+        result = {}
+        conditions = {'any': '', 'guest': f'[name={GUEST_NAME}]',
+                      'host': f'[name={host.player}]', 'cow': '[tag=h059_cause]'}
+        for name, condition in conditions.items():
+            holder = f'#h059_{serial}_{observer.name}_{name}'
+            observer('command', command=f'scoreboard players set {holder} {objective} 0')
+            observer('command', command=f'execute as {target} on attacker if entity @s{condition} '
+                     f'run scoreboard players set {holder} {objective} 1')
+            line = server_reply(observer, f'scoreboard players get {holder} {objective}', holder, objective, ' has ')
+            result[name] = int(re.search(r' has (-?\d+) ', line).group(1))
+        return result
+
+    try:
+        frozen = game_time()
+        host('command', command='summon cow 8 200 8 {NoAI:1b,NoGravity:1b,Tags:["h059_cause"]}')
+        cow = '@e[tag=h059_cause,limit=1]'
+        cases = [('none', '', 'none'), ('cow', f' by {cow}', 'cow'),
+                 ('host', f' by {host.player}', 'host'), ('guest', f' by {GUEST_NAME}', 'guest'),
+                 ('indirect_guest', f' by {cow} from {GUEST_NAME}', 'guest')]
+        serial = 0
+        for issuer in (host, guest):
+            for kind, health in (('pig', 9000), ('warden', 499000)):
+                for cause, suffix, expected in cases:
+                    serial += 1
+                    tag = f'h059_subject_{serial}'
+                    target = f'@e[tag={tag},limit=1]'
+                    host('command', command=f'summon {kind} 4 200 4 '
+                         f'{{NoAI:1b,NoGravity:1b,Tags:["h059_subject","{tag}"]}}')
+                    server_reply(issuer, f'damage {target} 1 minecraft:player_attack{suffix}', 'Applied')
+                    line = server_reply(host, f'data get entity {target} Health 1000', str(health))
+                    assert re.search(rf'\b{health}\b', line), line
+                    want = {name: int(name == expected or name == 'any' and expected != 'none')
+                            for name in ('any', 'guest', 'host', 'cow')}
+                    row = {g.name: relations(g, target, serial) for g in (host, guest)}
+                    seen[f'{issuer.name}/{kind}/{cause}'] = row
+                    assert all(result == want for result in row.values()), (issuer.name, kind, cause, want, row)
+                    if issuer is host and kind == 'pig' and cause == 'host':
+                        # Refused equal damage keeps the old attacker; an accepted
+                        # stronger hit replaces it with the other connected player.
+                        for amount, remaining, credit in ((1, 9000, 'host'), (2, 8000, 'guest')):
+                            host('command', command=f'damage {target} {amount} minecraft:player_attack by {GUEST_NAME}')
+                            server_reply(host, f'data get entity {target} Health 1000', str(remaining))
+                            changed = {g.name: relations(g, target, f'{serial}_hit{amount}') for g in (host, guest)}
+                            expected_credit = {name: int(name in ('any', credit)) for name in want}
+                            seen[f'host/pig/replacement{amount}'] = changed
+                            assert all(value == expected_credit for value in changed.values()), changed
+                    host('command', command=f'kill {target}')
+        assert game_time() == frozen, 'damage and attacker reads must not advance world ticks'
+    finally:
+        host('command', command='kill @e[tag=h059_subject]')
+        host('command', command='kill @e[tag=h059_cause]')
+        host('command', command=f'scoreboard objectives remove {objective}')
+        host('command', command='forceload remove 0 0')
+        for g, at in positions:
+            g('command', command='tp @s ' + ' '.join(str(v) for v in at))
+            g('command', command='gamemode survival')
+        host('command', command='tick unfreeze')
+    return seen
+
+
+CHECKS += ['damage-attacker']
+CHECK_FNS['damage-attacker'] = check_damage_attacker
+
+
 if __name__ == '__main__':
     main()
