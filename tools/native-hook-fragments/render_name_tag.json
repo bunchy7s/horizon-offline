@@ -1,0 +1,5 @@
+{
+  "hooks": [{"name":"render_name_tag", "target":"horizon_client::game::native_hooks::Game<'_>::native_render_name_tag", "neoforge":"RenderNameTagEvent", "side":"client", "cancellable":false, "mod_api":{"contract":"listen"}}],
+  "rust_summary":"a name tag hook (native_render_name_tag).",
+  "doc_summary":"a name tag hook (native_render_name_tag), API @API:render_name_tag@."
+}
