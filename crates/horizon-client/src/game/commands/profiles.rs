@@ -1,8 +1,9 @@
-//! `/op`, `/deop`, `/ban`, `/pardon`, `/ban-ip`, `/pardon-ip`, `/banlist` and
-//! `/whitelist` (OpCommand, DeOpCommands, BanPlayerCommands, PardonCommand,
-//! BanIpCommands, PardonIpCommand, BanListCommands, WhitelistCommand):
-//! commands of a dedicated server, run on its lists by an operator in game
-//! (the console has its own handlers in game/dedicated.rs).
+//! `/op`, `/deop`, `/ban`, `/pardon`, `/ban-ip`, `/pardon-ip`, `/banlist`,
+//! `/setidletimeout` and `/whitelist` (OpCommand, DeOpCommands,
+//! BanPlayerCommands, PardonCommand, BanIpCommands, PardonIpCommand,
+//! BanListCommands, SetPlayerIdleTimeoutCommand, WhitelistCommand): commands
+//! of a dedicated server, run on its lists by an operator in game (the
+//! console has its own handlers in game/dedicated.rs).
 use super::{Arg, Context, Game, R, Target, err};
 use horizon_client::{
     server::user_lists::{BanEntry, NameAndId, OpEntry, WhiteEntry},
@@ -273,6 +274,21 @@ impl Game<'_> {
         Ok(players.len() as i32)
     }
 
+    /// `SetPlayerIdleTimeoutCommand.setIdleTimeout`: the minutes of idleness
+    /// after which a player is kicked (`multiplayer.disconnect.idling`), 0 for
+    /// never. The reply names the minutes, or says the timeout is off, and the
+    /// command's result is the number of minutes.
+    pub(super) fn cmd_setidle_timeout(&mut self, ctx: &Context) -> R<i32> {
+        let lists = self.dedicated_lists()?;
+        let Some(Arg::Int(minutes)) = ctx.get("minutes") else {
+            return Ok(0);
+        };
+        let minutes = *minutes;
+        lists.lock().unwrap().player_idle_timeout = minutes;
+        self.feedback(idle_timeout_reply(minutes));
+        Ok(minutes)
+    }
+
     /// `BanListCommands.showList`: the players' bans then the addresses'
     /// (`banlist`), or one of them; told to the source only.
     pub(super) fn cmd_banlist(&mut self, id: &str) -> R<i32> {
@@ -415,5 +431,44 @@ impl Game<'_> {
                 Ok(count)
             }
         }
+    }
+}
+
+/// `SetPlayerIdleTimeoutCommand.setIdleTimeout`'s reply: the minutes, or
+/// `commands.setidletimeout.success.disabled` when the timeout is off.
+fn idle_timeout_reply(minutes: i32) -> Text {
+    if minutes > 0 {
+        Text::translate(
+            "commands.setidletimeout.success",
+            &[Text::literal(minutes.to_string())],
+        )
+    } else {
+        Text::translate("commands.setidletimeout.success.disabled", &[])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::idle_timeout_reply;
+
+    /// `SetPlayerIdleTimeoutCommand.setIdleTimeout`: minutes above zero are
+    /// named in `commands.setidletimeout.success`, and zero turns the timeout
+    /// off with `commands.setidletimeout.success.disabled`.
+    #[test]
+    fn the_idle_timeout_reply_names_the_minutes_or_says_it_is_off() {
+        let reply = idle_timeout_reply(5);
+        assert_eq!(
+            reply.translation_key(),
+            Some("commands.setidletimeout.success"),
+            "{reply:?}"
+        );
+        assert_eq!(reply.component()["with"], serde_json::json!([5]));
+        let off = idle_timeout_reply(0);
+        assert_eq!(
+            off.translation_key(),
+            Some("commands.setidletimeout.success.disabled")
+        );
+        // The disabled message takes no argument.
+        assert!(off.component().get("with").is_none(), "{off:?}");
     }
 }
