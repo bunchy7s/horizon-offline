@@ -1,0 +1,29 @@
+{
+  "hooks": [],
+  "helpers": [
+    {
+      "name": "living",
+      "target": "horizon_client::game::native_living_refs::Game<'_>::native_living"
+    },
+    {
+      "name": "living_equipment",
+      "target": "horizon_client::game::native_living_refs::Game<'_>::native_living_equipment",
+      "receiver": "living"
+    },
+    {
+      "name": "living_hand_item",
+      "target": "horizon_client::game::native_living_refs::Game<'_>::native_living_hand_item",
+      "receiver": "living"
+    },
+    {
+      "name": "living_set_equipment",
+      "target": "horizon_client::game::native_living_refs::Game<'_>::native_living_set_equipment",
+      "receiver": "living"
+    }
+  ],
+  "rust_summary": "living entity handles (`LivingRef`, `native_living`) and a living entity's equipment and hand items, read and set.",
+  "doc_summary": "`LivingRef`, made with `host.living(entity)`: `living.equipment(host, EquipmentSlot)`, `hand_item(host, Hand)` and `set_equipment(host, slot, stack)`. Bundles need \"hooks\": @API:living_refs@.",
+  "comments": [
+    "crates/horizon-client/src/game/native_living_refs.rs"
+  ]
+}

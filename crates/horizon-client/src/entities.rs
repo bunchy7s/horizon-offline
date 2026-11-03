@@ -105,7 +105,8 @@ pub struct ItemEntity {
     pub velocity: Vec3,
     pub on_ground: bool,
     pub age: i32,
-    pub pickup_delay: u32,
+    /// Signed NBT counter; widened to retain the legacy internal u32::MAX sentinel.
+    pub pickup_delay: i64,
     pub bob_offset: f32,
     /// `Entity.tickCount`: ticks since the item entered the level, which
     /// paces `ItemEntity.mergeWithNeighbours`.
@@ -345,7 +346,7 @@ impl ItemEntity {
     ) -> ItemStep {
         self.ticks += 1;
         self.previous = self.position;
-        if self.pickup_delay > 0 && self.pickup_delay != u32::MAX {
+        if self.pickup_delay > 0 && !self.has_infinite_pickup_delay() {
             self.pickup_delay -= 1;
         }
         let old_velocity = self.velocity;
@@ -631,10 +632,13 @@ impl ItemEntity {
             Vec3::new(v.x, new_delta_y(-0.05), v.z)
         };
     }
+    fn has_infinite_pickup_delay(&self) -> bool {
+        self.pickup_delay == i64::from(i16::MAX) || self.pickup_delay == i64::from(u32::MAX)
+    }
     /// `ItemEntity.isMergable` at `age`: a stack below its size whose pickup
     /// delay isn't infinite, before its lifetime ends.
     fn mergeable(&self, age: i32, max_stack: u32) -> bool {
-        self.pickup_delay != u32::MAX
+        !self.has_infinite_pickup_delay()
             && age != i16::MIN as i32
             && age < 6000
             && self.stack.count < max_stack
@@ -2190,12 +2194,14 @@ mod merge_tests {
 
     #[test]
     fn unmergeable_items_are_skipped() {
-        let mut items = [
-            item("minecraft:sand", 1, 0.5, 1),
-            item("minecraft:sand", 1, 0.5, 1),
-        ];
-        items[1].pickup_delay = u32::MAX;
-        assert_eq!(merge(&mut items, 0), [Some(1), Some(1)]);
+        for delay in [i64::from(i16::MAX), i64::from(u32::MAX)] {
+            let mut items = [
+                item("minecraft:sand", 1, 0.5, 1),
+                item("minecraft:sand", 1, 0.5, 1),
+            ];
+            items[1].pickup_delay = delay;
+            assert_eq!(merge(&mut items, 0), [Some(1), Some(1)]);
+        }
         // At age 6000 the other item's lifetime is over; this one's tick
         // started at 5999, so it may still merge into a live item.
         let mut items = [
