@@ -41,6 +41,16 @@ pub fn call(shared: &Shared, client: u32, short: &str, argument: &Value) -> Resu
                     .ok_or_else(|| invalid_params(format!("Not a boolean: {argument}")))?,
             ),
         ),
+        "serversettings/pause_when_empty_seconds" => game.pause_when_empty_seconds(client, None),
+        "serversettings/pause_when_empty_seconds/set" => game.pause_when_empty_seconds(
+            client,
+            Some(
+                argument
+                    .as_i64()
+                    .and_then(|value| i32::try_from(value).ok())
+                    .ok_or_else(|| invalid_params(format!("Not a number: {argument}")))?,
+            ),
+        ),
         "gamerules" => game.gamerules(client, None),
         "gamerules/update" => game.gamerules(client, Some(argument)),
         "serversettings/motd" => game.motd(client, None),
@@ -450,6 +460,29 @@ impl Game<'_> {
         let reply = self.ask(&format!("management {client} {request}"))?;
         if let Some(error) = reply["error"].as_str() {
             return Err((INTERNAL_ERROR, Some(error.to_owned())));
+        }
+        Ok(reply["value"].clone())
+    }
+
+    /// `MinecraftServerSettingsServiceImpl.getPauseWhenEmptySeconds` and `setPauseWhenEmptySeconds`.
+    fn pause_when_empty_seconds(&self, client: u32, value: Option<i32>) -> Result<Value, Failure> {
+        let mut request = json!({ "method": "serversettings/pause_when_empty_seconds" });
+        if let Some(value) = value {
+            request["method"] = json!("serversettings/pause_when_empty_seconds/set");
+            request["value"] = json!(value);
+        }
+        let reply = self.ask(&format!("management {client} {request}"))?;
+        if let Some(error) = reply["error"].as_str() {
+            return Err((INTERNAL_ERROR, Some(error.to_owned())));
+        }
+        if let Some(value) = value {
+            crate::config::update(
+                &self.shared.dir,
+                "properties",
+                "pause-when-empty-seconds",
+                toml::Value::Integer(i64::from(value)),
+            )
+            .map_err(|e| (INTERNAL_ERROR, Some(e)))?;
         }
         Ok(reply["value"].clone())
     }

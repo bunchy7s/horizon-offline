@@ -422,7 +422,8 @@ fn ban_fields<T>(ban: &BanEntry<T>) -> serde_json::Value {
 }
 
 /// The operator, whitelist and ban lists (DedicatedPlayerList), shared with
-/// the connection threads that check logins.
+/// the connection threads that check logins, and the server's own switches
+/// that an operator's command changes.
 pub(super) struct Lists {
     pub ops: OpList,
     pub white: WhiteList,
@@ -432,6 +433,10 @@ pub(super) struct Lists {
     pub enforce_whitelist: bool,
     /// `op-permission-level`: what `/op` grants (operatorUserPermissions).
     pub op_level: i32,
+    /// `/stop` (MinecraftServer.halt): the server loop ends after this tick.
+    pub stop: bool,
+    /// `MinecraftServer.isAutoSave`: all of Horizon's server levels share this save flag.
+    pub autosave: bool,
 }
 impl Lists {
     fn load() -> Self {
@@ -443,6 +448,8 @@ impl Lists {
             use_whitelist: false,
             enforce_whitelist: false,
             op_level: 4,
+            stop: false,
+            autosave: true,
         };
         // Each list tells the event stream what changes in it, as vanilla's tell their `NotificationService`.
         l.ops.watch(|change| {
@@ -655,9 +662,9 @@ fn append(to: &mut Tag, sibling: Tag) {
 struct ServerState {
     lists: Arc<Mutex<Lists>>,
     console: mpsc::Receiver<String>,
-    stop: bool,
-    autosave: bool,
     empty_ticks: i32,
+    /// The mutable `DedicatedServer.pauseWhenEmptySeconds` setting.
+    pause_when_empty_seconds: i32,
     /// The mutable `DedicatedServer.playerIdleTimeout` setting, in minutes.
     player_idle_timeout: i32,
     /// When the last passes of the loop ended, for the tick rate horizon-server shows.
@@ -696,13 +703,14 @@ fn save_all_reply(saved: bool) -> Text {
 
 /// `MinecraftServer.isAutoSave`: all of Horizon's server levels share this save flag.
 fn auto_save(state: &ServerState) -> bool {
-    state.autosave
+    state.lists.lock().unwrap().autosave
 }
 
 /// `MinecraftServer.setAutoSave`: enable or disable periodic saves and report whether it changed.
-fn set_auto_save(state: &mut ServerState, enabled: bool) -> bool {
-    let changed = state.autosave != enabled;
-    state.autosave = enabled;
+pub(super) fn set_auto_save(lists: &Mutex<Lists>, enabled: bool) -> bool {
+    let mut l = lists.lock().unwrap();
+    let changed = l.autosave != enabled;
+    l.autosave = enabled;
     changed
 }
 
@@ -1065,9 +1073,8 @@ impl Game<'_> {
         let mut state = ServerState {
             lists,
             console,
-            stop: false,
-            autosave: true,
             empty_ticks: 0,
+            pause_when_empty_seconds: props.pause_when_empty_seconds,
             player_idle_timeout: props.player_idle_timeout,
             ticks: Default::default(),
             paused: false,
@@ -1083,7 +1090,6 @@ impl Game<'_> {
             ),
             max_players: props.max_players.max(0) as usize,
         };
-        let pause_after = props.pause_when_empty_seconds * 20;
         let mut next = Instant::now();
         // The panic that ended the tick loop, when one did.
         let mut crashed: Option<String> = None;
@@ -1091,7 +1097,7 @@ impl Game<'_> {
         let watchdog = Watchdog::start(props.max_tick_time);
         let mut braked = Instant::now();
         let mut overload_warned: Option<Instant> = None;
-        while !state.stop {
+        while !state.lists.lock().unwrap().stop {
             let tick_start = Instant::now();
             if let Some(watchdog) = &watchdog {
                 watchdog.tick_due(next, self.clock.tick_duration());
@@ -1109,6 +1115,9 @@ impl Game<'_> {
                 break;
             }
             let players = self.lan.as_ref().map_or(0, |h| h.hub.guests.len());
+            // Vanilla reads pauseWhenEmptySeconds on every tick, so management changes take effect
+            // without restarting the server.
+            let pause_after = state.pause_when_empty_seconds.wrapping_mul(20);
             if pause_after > 0 {
                 // A `/pregen` task keeps the server busy as a player would:
                 // paused, nothing would post-process its chunks.
@@ -1125,12 +1134,12 @@ impl Game<'_> {
                     "INFO",
                     &format!(
                         "Server empty for {} seconds, pausing",
-                        props.pause_when_empty_seconds
+                        state.pause_when_empty_seconds
                     ),
                 );
                 self.save_game()?;
             }
-            if !paused && !state.autosave {
+            if !paused && !auto_save(&state) {
                 // `MinecraftServer.autoSave` keeps its schedule while every level's
                 // `noSave` flag is set, but writes nothing. The tick below counts down
                 // once, so reset one tick early when this save would have been due.
@@ -1407,7 +1416,7 @@ impl Game<'_> {
         match command {
             "stop" => {
                 self.console_reply(Text::translate("commands.stop.stopping", &[]));
-                state.stop = true;
+                state.lists.lock().unwrap().stop = true;
             }
             // Horizon's own, on the console only: a performance report (report.rs).
             "horizon-report" => {
@@ -1448,14 +1457,14 @@ impl Game<'_> {
                 self.console_reply(save_all_reply(saved.is_ok()));
             }
             "save-off" => {
-                if set_auto_save(state, false) {
+                if set_auto_save(&state.lists, false) {
                     self.console_reply(Text::translate("commands.save.disabled", &[]));
                 } else {
                     self.console_reply(Text::translate("commands.save.alreadyOff", &[]));
                 }
             }
             "save-on" => {
-                if set_auto_save(state, true) {
+                if set_auto_save(&state.lists, true) {
                     self.console_reply(Text::translate("commands.save.enabled", &[]));
                 } else {
                     self.console_reply(Text::translate("commands.save.alreadyOn", &[]));
@@ -1883,6 +1892,13 @@ impl Game<'_> {
     pub(super) fn set_enforce_whitelist(&mut self, lists: &Arc<Mutex<Lists>>, on: bool) {
         lists.lock().unwrap().enforce_whitelist = on;
         self.store_property("enforce-whitelist", on.to_string());
+    }
+
+    /// `DedicatedServer.setPauseWhenEmptySeconds`: the live pause timer, and
+    /// `pause-when-empty-seconds` in server.properties.
+    fn set_pause_when_empty_seconds(&mut self, state: &mut ServerState, seconds: i32) {
+        state.pause_when_empty_seconds = seconds;
+        self.store_property("pause-when-empty-seconds", seconds.to_string());
     }
 
     /// DedicatedServerSettings.update: change one key and store the file.

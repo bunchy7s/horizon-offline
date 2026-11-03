@@ -368,6 +368,7 @@ impl Stage<'_> {
             if sampler_ty.contains_key(t)
                 || params.contains_key(t)
                 || uniforms.get(t).is_some_and(|ty| ty == "bool")
+                || self.core_matrix(t).is_some()
                 || ((depth > 0 || !calls.is_empty()) && self.runtime_array_lengths.contains_key(t))
             {
                 let before = prev(i).map(|j| self.tokens[j]);
@@ -394,6 +395,10 @@ impl Stage<'_> {
             }
             if hidden.iter().any(|&(h, from, _)| h == t && i >= from) {
                 out.push_str(t);
+                continue;
+            }
+            if let Some(matrix) = self.core_matrix(t) {
+                out.push_str(matrix);
                 continue;
             }
             // A sampler named like a function (`texture(texture, uv)`) is the function when called.

@@ -633,7 +633,14 @@ pub(super) fn level_shapes(
         "minecraft:the_end",
     ] {
         let shape = overrides.level_height(level).and_then(|h| {
-            LevelShape::new(h.min_y, h.height, h.logical_height, h.has_skylight).ok()
+            LevelShape::new(
+                h.min_y,
+                h.height,
+                h.logical_height,
+                h.has_skylight,
+                h.has_ceiling,
+            )
+            .ok()
         });
         match shape {
             Some(shape) => *shapes.get_mut(level) = shape,
@@ -804,7 +811,10 @@ pub(super) fn make_streaming(
         let preset = horizon_client::save::WorldGen::preset(world_root);
         let overrides =
             world_worldgen_overrides(world_root, &options.resources, &biomes, enabled_features);
-        let mut inner = VanillaTerrain::for_world_with(&options.resources.join("worldgen"), &overrides, pack.assets.registry, &biomes, seed, preset, dim.id(), structures).map_err(|e| {
+        let saved_stem = horizon_client::save::world_gen_settings(world_root)
+            .and_then(|s| s.get("dimensions")?.get(dim.id()).cloned())
+            .map(|stem| horizon_client::scoreboard::tag_to_json(&stem));
+        let mut inner = VanillaTerrain::for_world_with_settings(&options.resources.join("worldgen"), &overrides, pack.assets.registry, &biomes, seed, preset, dim.id(), structures, saved_stem.as_ref()).map_err(|e| {
                 if overrides.is_empty() {
                     format!("{e}\nPrepare the worldgen bundle with the launcher, or: horizon-prepare --prepare")
                 } else {

@@ -92,6 +92,7 @@ Player.increaseScore	skip:other		the score is experience.total in Horizon (death
 Player.getWeaponItem	missing		the riptide spin attack keeps only `auto_spin_attack_ticks` and `auto_spin_attack_dmg`, not the stack it started with (`autoSpinAttackItemStack`), so there is no item to answer with mid-spin
 Player.destroyVanishingCursedItems	port	crates/horizon-client/src/game.rs::Game::drop_inventory	vanishing-curse stacks are removed from the death drops
 Player.hasCorrectToolForDrops	port	crates/horizon-client/src/game.rs::Game::tick_mining	the correct-tool test for harvest drops
+Player.canDropItems	inline	crates/horizon-client/src/lan/menu.rs::click	THROW is not acted on while the client has dropped items too fast
 Player.readAdditionalSaveData	port	crates/horizon-client/src/save.rs::Level::read_player	
 Player.addAdditionalSaveData	port	crates/horizon-client/src/save.rs::Level::player_tag	
 Player.hurtHelmet	inline	crates/horizon-client/src/game.rs::Game::hurt_armor	gap: minor: hurt_armor hits all four armour slots; the head-only hit from LivingEntity.hurt is not separated

@@ -2232,6 +2232,9 @@ impl Game<'_> {
         // drops remain absent from the snapshot until the following tick.
         if !paused {
             self.tick_guests(&mut host);
+            // The vehicles the guests just moved enter their portals now.
+            let ridden: Vec<u32> = host.hub.guests.iter().filter_map(|g| g.vehicle).collect();
+            self.find_ridden_vehicle_portals(&ridden);
         }
         {
             let has_guests = !host.hub.guests.is_empty();
@@ -2458,6 +2461,9 @@ impl Game<'_> {
         // PlayerEvent.LoadFromFile: the player's data is read and applied,
         // the player not yet placed.
         self.native_player_load_from_file(g.uuid, &g.name, &playerdata::directory(&root));
+        // PrepareSpawnTask: with no saved rotation the player faces the world
+        // spawn's angle (`/setworldspawn ... <angle>`).
+        playerdata::face_world_spawn(g, known, self.level.world_spawn_angle);
         if !known || force {
             g.game_mode = default_mode;
         }

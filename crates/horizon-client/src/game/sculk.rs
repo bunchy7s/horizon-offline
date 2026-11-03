@@ -1978,9 +1978,8 @@ pub(super) fn darkness_blend_added(e: &EffectInstance, blend: bool) -> (f32, f32
     (factor, factor)
 }
 
-/// `Entity.processFlappingMovement`'s per-tick gate, before its air-below
-/// test: `Bee.isFlapping` (flying, every other tick) and `Bat.isFlapping`
-/// (awake, every tenth tick).
+/// `Bee.isFlapping` (flying, every other tick) and `Bat.isFlapping`
+/// (awake, every tenth tick). Bird distance thresholds run in mob movement.
 fn flaps(species: Species, resting: bool, on_ground: bool, age: u32) -> bool {
     match species {
         Species::Bee => !on_ground && age.is_multiple_of(2),
