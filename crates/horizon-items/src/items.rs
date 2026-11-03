@@ -193,9 +193,9 @@ pub struct ItemInfo {
     pub disable_blocking_seconds: f32,
     /// `weapon.item_damage_per_attack`, when the item is a weapon.
     pub weapon_damage: Option<u32>,
-    /// `use_effects.speed_multiplier` (UseEffects.DEFAULT: 0.2).
     /// `villager_food.nutrition`: what a villager gets from eating it.
     pub villager_food: Option<i32>,
+    /// `use_effects.speed_multiplier` (UseEffects.DEFAULT: 0.2).
     pub use_speed: f32,
     /// `use_effects.can_sprint` (default false): sprinting may start while the
     /// item is in use.
