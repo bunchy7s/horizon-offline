@@ -327,7 +327,16 @@ impl Game<'_> {
             c.previous_yaw = c.yaw;
             c.previous_pitch = c.pitch;
             if !lerp_cart(c) {
+                let previous = c.position;
                 c.position = step(c.id, c.position);
+                let movement = Vec3::new(
+                    c.position.x - previous.x,
+                    c.position.y - previous.y,
+                    c.position.z - previous.z,
+                );
+                if movement != Vec3::ZERO || c.velocity == Vec3::ZERO {
+                    c.velocity = movement;
+                }
             }
             c.accumulate_rotation();
             if c.kind == super::minecarts::CartKind::Furnace
