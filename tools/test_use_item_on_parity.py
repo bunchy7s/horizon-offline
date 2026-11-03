@@ -272,6 +272,31 @@ def crop_case(rng, states, case):
     case['cells'] = cells
 
 
+WIRE_SIDES = ['none', 'side', 'up']
+
+
+def wire_case(rng, states, case):
+    """A redstone wire clicked with an empty hand (`RedstoneWireBlock.useWithoutItem`): a wire that
+    is neither a `cross` (connected to all four sides) nor a `dot` (connected to none) passes the
+    click on, and one that is either takes the opposite shape, keeping its `POWER` and its
+    connections, which `getConnectionState` recomputes while `updatesOnShapeChange` notifies the
+    neighbours whose connection changed. Nothing is played and no game event is sent."""
+    props = dict(zip(('north', 'east', 'south', 'west'), (rng.choice(WIRE_SIDES) for _ in range(4))))
+    props['power'] = str(rng.choice([0, 0, 1, 7, 15]))
+    cells = [[0, 0, 0, states.get('redstone_wire', **props)],
+             [0, -1, 0, states.get(rng.choice(['stone', 'dirt', 'oak_planks', 'grass_block']))]]
+    for direction, at in (('north', (0, 0, -1)), ('east', (1, 0, 0)), ('south', (0, 0, 1)), ('west', (-1, 0, 0))):
+        if rng.random() < 0.6:
+            name = rng.choice(['redstone_wire', 'redstone_wire', 'lever', 'stone', 'repeater', 'redstone_block'])
+            # Wire, levers and repeaters have too many states to name one; stone and
+            # a redstone block have a single default.
+            varied = ('redstone_wire', 'lever', 'repeater')
+            cells.append([*at, states.any(rng, name) if name in varied else states.get(name)])
+    case['use_item'] = {'item': '-', 'creative': rng.random() < 0.2, 'sneaking': rng.random() < 0.15,
+                        'food': 20, 'face': rng.choice(['up', 'north', 'south', 'west', 'east'])}
+    case['cells'] = cells
+
+
 STATUES = [f'{wax}{age}copper_golem_statue' for wax in ('', 'waxed_')
            for age in ('', 'exposed_', 'weathered_', 'oxidized_')]
 
@@ -298,6 +323,35 @@ def statue_case(rng, states, case):
     case['use_item'] = use
 
 
+def timed_case(rng, states, case):
+    """A repeater, a comparator or a daylight detector clicked with an empty hand, none of which may
+    be turned where `Player.getAbilities().mayBuild` is false (`RepeaterBlock.useWithoutItem`,
+    `ComparatorBlock.useWithoutItem`, `DaylightDetectorBlock.useWithoutItem` all answer PASS there).
+    A repeater cycles its `delay` through 1 to 4 with `setBlockAndUpdate` and nothing else; a
+    comparator cycles `mode` between `compare` and `subtract` with a `block.comparator.click` at
+    volume 0.3 and pitch 0.55 for `subtract` / 0.5 for `compare`, `Level.setBlock` writes the state
+    and the comparator refreshes its output; a daylight detector cycles `inverted`, writes the state,
+    sends `block_change` and recomputes the `power` it emits."""
+    name = rng.choice(['repeater'] * 2 + ['comparator'] * 2 + ['daylight_detector'])
+    props = {'facing': rng.choice(['north', 'south', 'west', 'east'])}
+    if name == 'repeater':
+        props.update(delay=str(rng.randrange(1, 5)), locked=rng.choice(['true', 'false']))
+    elif name == 'comparator':
+        props.update(mode=rng.choice(['compare', 'subtract']))
+    else:
+        props.pop('facing')
+        props.update(inverted=rng.choice(['true', 'false']), power=str(rng.randrange(16)))
+    cells = [[0, 0, 0, states.get(name, **props)],
+             [0, -1, 0, states.get(rng.choice(['stone', 'dirt', 'oak_planks', 'grass_block']))]]
+    if name != 'daylight_detector' and rng.random() < 0.5:
+        # Something for the diode to read, on the side it faces.
+        face = {'north': (0, 0, -1), 'south': (0, 0, 1), 'west': (-1, 0, 0), 'east': (1, 0, 0)}[props['facing']]
+        cells.append([*face, states.get(rng.choice(['redstone_wire', 'lever', 'stone', 'redstone_block']))])
+    case['use_item'] = {'item': '-', 'creative': rng.random() < 0.2, 'sneaking': rng.random() < 0.15,
+                        'food': 20, 'face': rng.choice(['up', 'up', 'north', 'south', 'west', 'east'])}
+    case['cells'] = cells
+
+
 # Entities a block may be placed into (`Entity.blocksBuilding`), and blocks to place.
 BLOCKERS = ['skeleton', 'zombie', 'pig', 'chicken', 'cow', 'armor_stand', 'slime', 'bat']
 PLACED = ['obsidian', 'stone', 'oak_slab', 'oak_fence', 'white_carpet', 'torch', 'glass', 'oak_trapdoor', 'snow']
@@ -321,6 +375,33 @@ def blocked_case(rng, states, case):
     case['entities'] = entities
     case['use_item'] = {'item': d_plain(rng.choice(PLACED), rng.choice([1, 16])), 'creative': rng.random() < 0.3,
                         'sneaking': False, 'food': 20}
+
+
+BUTTONS = ['stone_button', 'oak_button', 'spruce_button', 'birch_button', 'jungle_button', 'acacia_button',
+           'cherry_button', 'dark_oak_button', 'mangrove_button', 'pale_oak_button', 'bamboo_button',
+           'crimson_button', 'warped_button', 'polished_blackstone_button']
+
+
+def switch_case(rng, states, case):
+    """A lever or a button clicked with an empty hand. `LeverBlock.useWithoutItem` always answers
+    SUCCESS and calls `pull`, which cycles `powered` both ways, writes it with `setBlockAndUpdate`,
+    updates the neighbours at the lever and at the block it hangs on, plays `block.lever.click` at
+    volume 0.3 with pitch 0.6 when the lever is now on and 0.5 when it is off, and sends
+    `block_activate` or `block_deactivate` (`LeverBlock.pull`, `LeverBlock.playSound`).
+    `ButtonBlock.useWithoutItem` answers CONSUME and touches nothing while the button is `powered`,
+    and otherwise `ButtonBlock.press`es it: `powered` on, the same neighbour updates, a release
+    scheduled `ticksToStayPressed` away (the block set type's own), the button type's own sound and
+    `block_activate`. Neither reads the held item, the hit or the game mode, so the case varies the
+    `face` and `facing` the block is attached by, every button type and `powered` either way."""
+    name = rng.choice(['lever'] * 2 + BUTTONS)
+    props = {'facing': rng.choice(['north', 'south', 'west', 'east']),
+             'face': rng.choice(['floor', 'wall', 'ceiling']),
+             'powered': rng.choice(['true', 'false'])}
+    cells = [[0, 0, 0, states.get(name, **props)],
+             [0, -1, 0, states.get(rng.choice(['stone', 'dirt', 'oak_planks', 'grass_block']))]]
+    case['use_item'] = {'item': '-', 'creative': rng.random() < 0.2, 'sneaking': rng.random() < 0.15,
+                        'food': 20, 'face': rng.choice(['up', 'up', 'north', 'south', 'west', 'east', 'down'])}
+    case['cells'] = cells
 
 
 def jukebox_case(rng, states, case):
@@ -454,6 +535,12 @@ def cases(facts, count, seed):
         case = {**h.environment(rng), 'pos': [0, 0, 0]}
         case.pop('raining', None)
         case.pop('thundering', None)
+        if rng.random() < 0.08:
+            wire_case(rng, states, case)
+            case['items'] = []
+            case['mode'] = 'dispense'
+            yield case
+            continue
         if rng.random() < 0.1:
             bed_case(rng, states, case)
             case['items'] = []
@@ -478,6 +565,12 @@ def cases(facts, count, seed):
             case['mode'] = 'dispense'
             yield case
             continue
+        if rng.random() < 0.08:
+            timed_case(rng, states, case)
+            case['items'] = []
+            case['mode'] = 'dispense'
+            yield case
+            continue
         if rng.random() < 0.1:
             blocked_case(rng, states, case)
             case['items'] = []
@@ -498,6 +591,12 @@ def cases(facts, count, seed):
             continue
         if rng.random() < 0.08:
             crop_case(rng, states, case)
+            case['items'] = []
+            case['mode'] = 'dispense'
+            yield case
+            continue
+        if rng.random() < 0.08:
+            switch_case(rng, states, case)
             case['items'] = []
             case['mode'] = 'dispense'
             yield case

@@ -799,9 +799,10 @@ fn same_type(w: &MobWorld, a: Who, b: Who) -> bool {
         _ => false,
     }
 }
-/// `PiglinAi.broadcastAngerTarget`: as a baby's hit calls it, the adult
-/// piglins around it that have no target (brutes too, unless the attacker is
-/// a hoglin, which they cannot hunt) take the attacker as theirs.
+/// `PiglinAi.broadcastAngerTarget`: as a hit on a baby, or on an adult that
+/// retaliates, calls it, the adult piglins around it that have no target
+/// (brutes too, unless the attacker is a hoglin, which they cannot hunt) take
+/// the attacker as theirs.
 fn broadcast_anger(m: &Mob, w: &MobWorld, by: Who, at: Vec3, events: &mut Vec<MobEvent>) {
     let range = m.attrs.follow_range;
     let hoglin = species_of(w, by) == Some(Species::Hoglin);
@@ -848,7 +849,10 @@ fn piglin_hurt(
     by: Who,
 ) {
     let species = species_of(w, by);
-    if species == Some(Species::Piglin) {
+    // `PiglinBruteAi.wasHurtBy` too: an `AbstractPiglin`'s hit is no one's to answer.
+    if species == Some(Species::Piglin)
+        || (m.species() == Species::PiglinBrute && species == Some(Species::PiglinBrute))
+    {
         return;
     }
     stop_admiring(m);
@@ -879,7 +883,11 @@ fn piglin_hurt(
         set_avoid_target_and_dont_hunt(m, lr, by, at);
         broadcast_retreat(m, w, by, at, events);
         m.ai.last_hurt_by = None;
-    } else if !piglin_retaliates(m, w, by, at) {
+    } else if piglin_retaliates(m, w, by, at) {
+        // `maybeRetaliate`: `broadcastAngerTarget` calls the adult piglins around it
+        // to the attacker, a brute's as a piglin's: the piglins and the brutes.
+        broadcast_anger(m, w, by, at, events);
+    } else {
         m.ai.last_hurt_by = None;
     }
 }
@@ -2110,6 +2118,52 @@ mod brute_sound_tests {
             assert_eq!(sounds(&events).len(), growls, "tick {tick}");
         }
         assert!(growls > 0, "the roll never hit");
+    }
+}
+
+#[cfg(test)]
+mod hurt_broadcast_tests {
+    use super::*;
+    use crate::mobs::sensor_scan_tests::kind;
+    use crate::mobs::world::{test_player, with_test_world};
+    use std::sync::Arc;
+
+    fn mob(id: u32, species: Species, at: Vec3) -> Mob {
+        let mut kind = kind();
+        Arc::make_mut(&mut kind).species = species;
+        Mob::new(id, kind, at, 0.0)
+    }
+
+    /// `PiglinBruteAi.wasHurtBy` is `PiglinAi.maybeRetaliate`, which calls the adult piglins
+    /// around it, the regular ones too (#7790).
+    #[test]
+    fn a_brute_hit_by_the_player_calls_the_piglins_around_it() {
+        let mut events = Vec::new();
+        let ran = with_test_world(&[], |w, _| {
+            let mut w = w.clone();
+            w.player = Some(test_player(Vec3::new(2.0, 64.0, 0.0)));
+            let mut brute = mob(1, Species::PiglinBrute, Vec3::new(0.0, 64.0, 0.0));
+            brute.ai.last_hurt_by = Some(Who::Player);
+            brute.ai.last_hurt_by_time = 5;
+            let piglin = mob(2, Species::Piglin, Vec3::new(3.0, 64.0, 0.0));
+            let others = [piglin.seen(None)];
+            w.others = &others;
+            let mut lr = LegacyRandom::new(1);
+            before_goals(&mut brute, &w, &mut lr, &mut events);
+        });
+        if !ran {
+            return;
+        }
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                MobEvent::SetTarget {
+                    mob: 2,
+                    target: Who::Player
+                }
+            )),
+            "the piglin takes the player as its target: {events:?}"
+        );
     }
 }
 

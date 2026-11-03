@@ -1,8 +1,8 @@
 //! Commands of the hosted game rather than the world: `/dialog`, `/kick`,
 //! `/posteffect`, `/fetchprofile`, `/spectate`, `/publish`, `/unpublish`,
 //! `/waypoint`, `/debug`, `/jfr` and `/test`; on a dedicated server only,
-//! `/op`, `/deop`, `/ban`, `/ban-ip`, `/banlist`, `/pardon`, `/pardon-ip` and
-//! `/whitelist`.
+//! `/op`, `/deop`, `/ban`, `/ban-ip`, `/banlist`, `/pardon`, `/pardon-ip`,
+//! `/transfer` and `/whitelist`.
 use super::{
     Dispatcher, Suggests,
     args::ArgType,
@@ -253,6 +253,16 @@ pub fn register_dedicated(d: &mut Dispatcher, root: usize) {
     d.executes(t, "ban");
     let reason = d.argument(t, "reason", ArgType::Message);
     d.executes(reason, "ban");
+
+    // TransferCommand: <hostname> [<port> [<players>]], the port 1 to 65535.
+    let transfer = d.literal(root, "transfer");
+    d.requires(transfer, ADMINS);
+    let hostname = d.argument(transfer, "hostname", ArgType::Str);
+    d.executes(hostname, "transfer");
+    let port = d.argument(hostname, "port", ArgType::Integer { min: 1, max: 65535 });
+    d.executes(port, "transfer");
+    let players = d.argument(port, "players", PLAYERS);
+    d.executes(players, "transfer");
 
     // WhitelistCommand
     let whitelist = d.literal(root, "whitelist");

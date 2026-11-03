@@ -10,7 +10,7 @@ use horizon_client::mod_api::{EntityRef, LevelRef};
 
 impl Game<'_> {
     /// What a handle names now, or None for a stale or foreign one.
-    fn native_entity_target(&self, entity: EntityRef) -> Option<Target> {
+    pub(super) fn native_entity_target(&self, entity: EntityRef) -> Option<Target> {
         if self.remote.is_some() || self.native_lifecycle.epoch() != Some(entity.epoch()) {
             return None;
         }
