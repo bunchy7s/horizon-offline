@@ -13,8 +13,11 @@ import net.minecraft.client.gui.screens.inventory.*;
 import net.minecraft.client.gui.screens.recipebook.*;
 import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.client.input.MouseButtonInfo;
+import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.NonNullList;
 import net.minecraft.world.SimpleContainer;
+import net.minecraft.world.entity.player.Abilities;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.*;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -23,11 +26,12 @@ import net.minecraft.world.item.Items;
  * Original oracle for the mouse handling of the survival and container
  * screens: the real AbstractContainerScreen.mouseClicked/mouseReleased of
  * ContainerScreen, HopperScreen, ShulkerBoxScreen and BeaconScreen (one slot
- * in the menu, the carried stack and the event's Shift modifiers from the
- * case) recording every slotClicked call they make, and the real
- * hasClickedOutside of those screens, MerchantScreen and the recipe book
- * screens (InventoryScreen, CraftingScreen, FurnaceScreen) with their
- * RecipeBookComponent's visibility and selected tab hover from the case.
+ * in the menu, the carried stack, the event's Shift modifiers and whether the
+ * player has infinite materials from the case) recording every slotClicked
+ * call they make, and the real hasClickedOutside of those screens,
+ * MerchantScreen and the recipe book screens (InventoryScreen,
+ * CraftingScreen, FurnaceScreen) with their RecipeBookComponent's visibility
+ * and selected tab hover from the case.
  */
 public final class VanillaContainerScreenOracle {
     static Object unsafe;
@@ -113,6 +117,14 @@ public final class VanillaContainerScreenOracle {
             for (var line : (Iterable<String>) lines::iterator) {
                 var c = JsonParser.parseString(line).getAsJsonObject();
                 out.println("== " + n++);
+                // mouseClicked's keyPickItem test asks the player whether it has
+                // infinite materials (Player.hasInfiniteMaterials: the abilities'
+                // instabuild), so the shell gets a player with just those.
+                var player = alloc(LocalPlayer.class);
+                var abilities = new Abilities();
+                abilities.instabuild = c.has("creative") && c.get("creative").getAsBoolean();
+                put(player, Player.class, "abilities", abilities);
+                put(shell, Minecraft.class, "player", player);
                 String kind = c.get("kind").getAsString();
                 var screen = screen(kind);
                 var image = c.getAsJsonArray("image");

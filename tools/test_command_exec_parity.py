@@ -24,6 +24,7 @@ import re
 import shutil
 import subprocess
 import sys
+import zipfile
 
 try:
     from . import lab, test_rust_parity as base
@@ -36,6 +37,24 @@ except ImportError:
     import command_exec_corpus as corpus_module
 
 SEED = 1
+
+
+def install_predicate_fixtures(world, predicates, jar):
+    if not predicates:
+        return
+    with zipfile.ZipFile(jar) as archive:
+        version = json.loads(archive.read('version.json'))['pack_version']
+    fmt = [version['data_major'], version['data_minor']]
+    pack = world / 'datapacks' / 'command-selector-fixture'
+    pack.mkdir(parents=True, exist_ok=True)
+    (pack / 'pack.mcmeta').write_text(json.dumps({'pack': {
+        'description': 'Command selector predicate fixtures', 'pack_format': fmt[0],
+        'min_format': fmt, 'max_format': fmt}}), encoding='utf-8')
+    for identifier, predicate in predicates.items():
+        namespace, path = identifier.split(':', 1)
+        target = pack / 'data' / namespace / 'predicate' / (path + '.json')
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(json.dumps(predicate), encoding='utf-8')
 
 
 def main():
@@ -73,12 +92,15 @@ def main():
     for _, lines in groups:
         script.extend(lines)
     script_path = build / 'script.jsonl'
-    script_path.write_text(''.join(json.dumps(op, ensure_ascii=False) + '\n' for op in script), encoding='utf-8')
+    script_path.write_text(''.join(json.dumps({k: v for k, v in op.items() if k != 'expect_result'},
+                                            ensure_ascii=False) + '\n' for op in script), encoding='utf-8')
+    predicates = corpus_module.predicate_selector_fixtures([name for name, _ in groups])
 
     run(['javac', '--release', lock['minecraft']['java_major'], '-proc:none', '-cp', str(jars['server']) + os.pathsep + dependency_path, '-d', classes, oracle], 'compile-java')
     vanilla_dir = build / 'vanilla'
     shutil.rmtree(vanilla_dir, ignore_errors=True)
     vanilla_dir.mkdir()
+    install_predicate_fixtures(vanilla_dir / 'universe/harness', predicates, jars['server'])
     run(['java', '-Xmx3G', '-Duser.timezone=UTC', '-cp', os.pathsep.join([str(classes), str(jars['server']), dependency_path]),
          'dev.horizonlab.parity.VanillaCommandExecOracle', vanilla_dir / 'universe', script_path, build / 'vanilla.jsonl', SEED], 'java', cwd=vanilla_dir)
 
@@ -91,6 +113,7 @@ def main():
     rust_dir = build / 'rust'
     shutil.rmtree(rust_dir, ignore_errors=True)
     rust_dir.mkdir()
+    install_predicate_fixtures(rust_dir / 'saves/harness', predicates, jars['server'])
     # The oracle's Services resolve no profile (/fetchprofile fails on the next tick): the game gets no services
     # either, a discovery address that refuses at once, rather than Mojang's over the network.
     env = lab.game_env(HORIZON_PLAYER_NAME="Player", HORIZON_COMMAND_SCRIPT=script_path,
@@ -101,6 +124,12 @@ def main():
     rust = [json.loads(l) for l in (build / 'rust.jsonl').open(encoding='utf-8')]
     if len(vanilla) != len(rust):
         sys.exit(f'record count differs: vanilla {len(vanilla)} rust {len(rust)}')
+    recorded_ops = [op for op in script if op['op'] == 'falling' or
+                    (op['op'] == 'cmd' and op.get('record', True)) or
+                    (op['op'] == 'tick' and op.get('record'))]
+    for op, reference in zip(recorded_ops, vanilla):
+        if 'expect_result' in op and reference.get('results') != [[True, op['expect_result']]]:
+            sys.exit(f'Java fixture control failed: {op["cmd"]}: {reference.get("results")}')
     commands_by_group = []
     index = 0
     for name, lines in groups:

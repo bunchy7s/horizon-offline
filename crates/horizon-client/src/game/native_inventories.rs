@@ -225,6 +225,9 @@ impl Game<'_> {
         if from_uuid == to_uuid && from_kind == to_kind {
             return Err("the same inventory".into());
         }
+        // A just-disconnected player can already be absent from the hub.
+        // Drain before reading or replacing their offline file.
+        let _ = self.finish_player_autosaves(true);
         let a = self.native_inventory_side(from_uuid)?;
         let b = if from_uuid == to_uuid {
             None
