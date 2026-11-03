@@ -396,6 +396,74 @@ impl Transport for Http {
     }
 }
 
+/// Item files in a folder instead of the service (`HORIZON_COSMETICS_LOCAL`): every player asked
+/// for wears the first item of each slot found there, by file name. For artists and the bench.
+pub struct Local {
+    dir: PathBuf,
+}
+
+impl Local {
+    pub fn new(dir: PathBuf) -> Self {
+        Self { dir }
+    }
+
+    /// The first item file of each slot, by file name.
+    fn worn(&self) -> Vec<String> {
+        let mut files: Vec<PathBuf> = std::fs::read_dir(&self.dir)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|e| e == "json"))
+            .collect();
+        files.sort();
+        let mut slots = Vec::new();
+        let mut ids = Vec::new();
+        for file in files {
+            if let Some(item) = std::fs::read(&file).ok().and_then(|b| Item::parse(&b).ok())
+                && !slots.contains(&item.slot)
+                && file.file_stem().is_some_and(|s| *s == *item.id)
+            {
+                slots.push(item.slot);
+                ids.push(item.id);
+            }
+        }
+        ids
+    }
+}
+
+impl Transport for Local {
+    fn post(&self, _: &str, body: &[u8]) -> Result<Vec<u8>, String> {
+        #[derive(serde::Deserialize)]
+        struct Asked {
+            players: Vec<String>,
+        }
+        let asked: Asked = serde_json::from_slice(body).map_err(|e| e.to_string())?;
+        let refs: Vec<_> = self
+            .worn()
+            .into_iter()
+            .map(|id| serde_json::json!({"id": id, "hash": "local"}))
+            .collect();
+        let players: serde_json::Map<String, serde_json::Value> = asked
+            .players
+            .into_iter()
+            .map(|p| (p, serde_json::Value::Array(refs.clone())))
+            .collect();
+        Ok(serde_json::json!({"ttl": 60, "players": players})
+            .to_string()
+            .into_bytes())
+    }
+
+    fn get(&self, path: &str) -> Result<Vec<u8>, String> {
+        let id = path
+            .trim_start_matches("/v1/items/")
+            .split('?')
+            .next()
+            .unwrap_or_default();
+        std::fs::read(self.dir.join(format!("{id}.json"))).map_err(|e| e.to_string())
+    }
+}
+
 #[cfg(test)]
 #[path = "fetch_tests.rs"]
 mod tests;

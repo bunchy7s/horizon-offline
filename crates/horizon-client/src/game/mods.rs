@@ -273,6 +273,23 @@ fn register_menu_types(mods: &[horizon_client::mod_content::ContentMod]) {
 /// What the launcher writes beside a game it built with native mods: their ids under `mods`.
 const BUILD_INFO: &str = "native-mods.json";
 
+/// `native-mods.json`'s `mods` list is not empty: the game was built with mods.
+fn build_lists_mods(built: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(built)
+        .ok()
+        .and_then(|info| info["mods"].as_array().map(|mods| !mods.is_empty()))
+        .unwrap_or(false)
+}
+
+/// Whether the game playing was built with native mods: the launcher writes their ids into
+/// [`BUILD_INFO`] beside the executable, and a release or Nightly has no such file.
+pub(super) fn built_with_native_mods() -> bool {
+    std::env::current_exe()
+        .ok()
+        .and_then(|exe| std::fs::read_to_string(exe.with_file_name(BUILD_INFO)).ok())
+        .is_some_and(|built| build_lists_mods(&built))
+}
+
 /// The native mods the launcher built this game with, `id version, id version`, for the crash
 /// report (`built`: its [`BUILD_INFO`]). None for a release or Nightly, which have no mods.
 fn native_mods_detail(built: &str) -> Option<String> {
@@ -421,6 +438,16 @@ impl Game<'_> {
 mod tests {
     use super::*;
     use std::io::Write;
+
+    /// Only a build whose `native-mods.json` lists a mod counts as built with mods.
+    #[test]
+    fn only_a_listed_mod_makes_a_build_a_mod_build() {
+        assert!(!build_lists_mods(""));
+        assert!(!build_lists_mods("{}"));
+        assert!(!build_lists_mods(r#"{"mods":[]}"#));
+        assert!(!build_lists_mods(r#"{"mods":"worldmap"}"#));
+        assert!(build_lists_mods(r#"{"mods":[{"id":"worldmap"}]}"#));
+    }
 
     /// A minimal `.hnmod` the registry accepts: its manifest and its mixin's.
     fn hnmod(dir: &std::path::Path, id: &str) {

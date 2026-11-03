@@ -281,7 +281,7 @@ fn section_of(position: [f64; 3]) -> [i32; 3] {
 
 /// VecDeltaCodec.encode.
 fn encode(v: f64) -> i64 {
-    (v * 4096.0).round() as i64
+    horizon_core::jmath::round(v * 4096.0)
 }
 
 /// `ServerEntity.isFullPrecisionEncodingRequired`: an item whose last move was
@@ -1220,6 +1220,12 @@ impl Entities {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn encode_rounds_ties_toward_positive_infinity() {
+        assert_eq!(encode(-2.5 / 4096.0), -2);
+        assert_eq!(encode(2.5 / 4096.0), 3);
+    }
 
     fn state(x: f64) -> EntityState {
         EntityState {
