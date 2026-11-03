@@ -1525,6 +1525,13 @@ fn cargo(rust: &Toolchain, dir: &Path, subcommand: &str) -> Command {
         cmd.arg("--config").arg(config);
     }
     cmd.arg("--manifest-path").arg(dir.join("Cargo.toml"));
+    // Only this stage's declarations apply, never a path inherited from the launcher's shell.
+    let injections = dir.join(inject::INPUT);
+    if injections.is_file() {
+        cmd.env(inject::ENV, injections);
+    } else {
+        cmd.env_remove(inject::ENV);
+    }
     cmd
 }
 
@@ -3216,6 +3223,42 @@ mod tests {
             record_key(Target::Server, Profile::Release),
             "server-release"
         );
+    }
+
+    #[test]
+    fn staged_cargo_uses_only_its_own_injections_including_cached_output() {
+        let d = dir("injection-env");
+        let fresh = d.join("fresh");
+        let snapshot = d.join("snapshot");
+        let stage = d.join("stage");
+        fs::create_dir_all(fresh.join("crates/horizon-client")).unwrap();
+        fs::write(
+            fresh.join("crates/horizon-client/Cargo.toml"),
+            "[package]\nname = 'horizon-client'\nversion = '0.1.0'\n[build-dependencies]\nhorizon-mod-api-gen = { path = '../horizon-mod-api-gen' }\n",
+        )
+        .unwrap();
+        let rust = Toolchain {
+            dir: d.join("rust"),
+        };
+        let env = |dir: &Path| {
+            cargo(&rust, dir, "build")
+                .get_envs()
+                .find(|(key, _)| *key == inject::ENV)
+                .map(|(_, value)| value.map(std::ffi::OsStr::to_owned))
+        };
+        assert_eq!(env(&stage), Some(None));
+        inject::stage(&fresh, &[]).unwrap();
+        sync(&fresh, &snapshot).unwrap();
+        sync(&snapshot, &stage).unwrap();
+        assert_eq!(fs::read(stage.join(inject::INPUT)).unwrap(), b"[]");
+        assert_eq!(
+            env(&stage),
+            Some(Some(stage.join(inject::INPUT).into_os_string()))
+        );
+        fs::remove_file(fresh.join(inject::INPUT)).unwrap();
+        sync(&fresh, &stage).unwrap();
+        assert_eq!(env(&stage), Some(None));
+        fs::remove_dir_all(d).unwrap();
     }
 
     /// The server build (docs/server.md): compiled headless off the same source, with its own

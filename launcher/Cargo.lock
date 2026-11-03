@@ -2703,6 +2703,7 @@ dependencies = [
  "horizon-cosmetics",
  "horizon-friends",
  "horizon-mcp",
+ "horizon-mod-api-gen",
  "horizon-mods",
  "horizon-port-pack",
  "horizon-prepare",
@@ -2718,7 +2719,6 @@ dependencies = [
  "oo7",
  "proc-macro2",
  "pulldown-cmark",
- "quote",
  "raw-window-handle",
  "security-framework 3.7.0",
  "semver",
@@ -2744,6 +2744,17 @@ name = "horizon-mcp"
 version = "0.1.0"
 dependencies = [
  "serde_json",
+]
+
+[[package]]
+name = "horizon-mod-api-gen"
+version = "0.1.0"
+dependencies = [
+ "heck 0.5.0",
+ "quote",
+ "serde",
+ "serde_json",
+ "syn 2.0.119",
 ]
 
 [[package]]

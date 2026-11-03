@@ -142,6 +142,9 @@ path = "tests/launch_api.rs"
 name = "mod_api_hooks"
 path = "tests/mod_api_hooks.rs"
 
+[build-dependencies]
+horizon-mod-api-gen = { path = "../horizon-mod-api-gen" }
+
 [lints]
 workspace = true
 

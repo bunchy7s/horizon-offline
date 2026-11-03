@@ -1218,6 +1218,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "heck"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
+
+[[package]]
 name = "hermit-abi"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1331,6 +1337,7 @@ dependencies = [
  "horizon-friends",
  "horizon-hdr",
  "horizon-items",
+ "horizon-mod-api-gen",
  "horizon-mods",
  "horizon-narrator",
  "horizon-optifine",
@@ -1462,6 +1469,7 @@ dependencies = [
  "horizon-cosmetics",
  "horizon-hdr",
  "horizon-items",
+ "horizon-mod-api-gen",
  "horizon-narrator",
  "horizon-optifine",
  "horizon-protocol",
@@ -1573,6 +1581,25 @@ dependencies = [
 name = "horizon-mcp"
 version = "0.1.0"
 dependencies = [
+ "serde_json",
+]
+
+[[package]]
+name = "horizon-mod-api-gen"
+version = "0.1.0"
+dependencies = [
+ "heck",
+ "quote",
+ "serde",
+ "serde_json",
+ "syn 2.0.119",
+]
+
+[[package]]
+name = "horizon-mod-api-gen-tests"
+version = "0.1.0"
+dependencies = [
+ "horizon-mod-api-gen",
  "serde_json",
 ]
 
@@ -5172,10 +5199,8 @@ checksum = "e450f9b2ed1dff33c94c12589a87338689467b9c4f5d8a5710bd09a847d2c8a7"
 name = "xtask"
 version = "0.1.0"
 dependencies = [
+ "horizon-mod-api-gen",
  "horizon-theme",
- "quote",
- "serde_json",
- "syn 2.0.119",
 ]
 
 [[package]]

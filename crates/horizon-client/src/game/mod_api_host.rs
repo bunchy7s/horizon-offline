@@ -145,8 +145,9 @@ impl Game<'_> {
     }
 }
 
-#[path = "mod_api_host_generated.rs"]
-mod generated;
+mod generated {
+    include!(concat!(env!("OUT_DIR"), "/mod_api_host_generated.rs"));
+}
 
 impl horizon_client::mod_api::LevelHost for super::GameLevel<'_> {
     fn block_state(&self, pos: [i32; 3]) -> BlockStateId {

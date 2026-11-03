@@ -75,6 +75,9 @@ audio = ["dep:cpal"]
 # Helpers horizon-client's tests build their fixtures with.
 test-support = []
 
+[build-dependencies]
+horizon-mod-api-gen = { path = "../horizon-mod-api-gen" }
+
 [lints]
 workspace = true
 
