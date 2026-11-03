@@ -5,7 +5,7 @@
 //! does; render preparation must diagnose these before baking.
 use crate::json::*;
 use serde_json::value::RawValue;
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, sync::Arc};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Direction {
@@ -59,6 +59,7 @@ pub enum TextureSlot {
 #[derive(Clone, Debug, PartialEq)]
 pub struct CuboidModel {
     pub parent: Option<String>,
+    pub loader: Option<Loader>,
     pub ambient_occlusion: Option<bool>,
     pub gui_light: Option<GuiLight>,
     pub textures: BTreeMap<String, TextureSlot>,
@@ -66,6 +67,20 @@ pub struct CuboidModel {
     pub display: Option<ItemTransforms>,
     /// NeoForge's `render_type`, without a `minecraft:` prefix.
     pub render_type: Option<String>,
+    /// A model's `visibility`: a composite child name to shown; absent is shown.
+    pub visibility: BTreeMap<String, bool>,
+}
+/// A custom model loader's payload; a model inherits its parent's loader unless it names its own.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Loader {
+    /// `neoforge:composite`: children in document order.
+    Composite {
+        children: Vec<(String, Arc<CuboidModel>)>,
+        /// Child name to shown; a child absent from the map is shown.
+        visibility: BTreeMap<String, bool>,
+    },
+    /// A loader this decoder does not know: it adds no geometry.
+    Unknown(String),
 }
 /// NeoForge's `neoforge_data` of an element or a face; a face's keys win.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -217,6 +232,11 @@ impl CuboidModel {
         } else {
             Some(identifier(&parent)?)
         };
+        let loader = obj
+            .get("loader")
+            .filter(|raw| raw.get() != "null")
+            .map(|raw| Loader::decode(raw, &obj))
+            .transpose()?;
         let ambient_occlusion = obj
             .get("ambientocclusion")
             .map(|r| boolean(r))
@@ -256,13 +276,54 @@ impl CuboidModel {
             .map(|name| name.strip_prefix("minecraft:").unwrap_or(&name).to_owned());
         Ok(Self {
             parent,
+            loader,
             ambient_occlusion,
             gui_light,
             textures,
             elements,
             display,
             render_type,
+            visibility: visibility(&obj)?,
         })
+    }
+    /// The models this one needs besides itself: its parent and its composite children's parents.
+    pub fn referenced_models(&self) -> Vec<String> {
+        let mut names: Vec<String> = self.parent.iter().cloned().collect();
+        if let Some(Loader::Composite { children, .. }) = &self.loader {
+            for (_, child) in children {
+                names.extend(child.referenced_models());
+            }
+        }
+        names
+    }
+}
+fn visibility(obj: &Object<'_>) -> Result<BTreeMap<String, bool>> {
+    let mut visibility = BTreeMap::new();
+    if let Some(raw) = obj.get("visibility") {
+        for (key, raw) in object(raw)? {
+            visibility.insert(key, boolean(raw)?);
+        }
+    }
+    Ok(visibility)
+}
+impl Loader {
+    fn decode(raw: &RawValue, obj: &Object<'_>) -> Result<Self> {
+        let name = primitive_string(raw)?;
+        match name.as_str() {
+            "neoforge:composite" => {
+                let mut children = Vec::new();
+                if let Some(raw) = obj.get("children") {
+                    for (name, raw) in ordered_object(raw)? {
+                        children.push((name, Arc::new(CuboidModel::decode(raw)?)));
+                    }
+                }
+                Ok(Self::Composite {
+                    children,
+                    visibility: visibility(obj)?,
+                })
+            }
+            _ => Ok(Self::Unknown(name)),
+        }
     }
 }
 fn nullable<T>(raw: &RawValue, decode: impl FnOnce(&RawValue) -> Result<T>) -> Result<Option<T>> {

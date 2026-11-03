@@ -495,6 +495,24 @@ impl Host for super::Game<'_> {
     fn block_collision(&self, pos: [i32; 3]) -> Vec<[f64; 6]> {
         self.native_block_collision(pos)
     }
+    fn entity_nbt(&mut self, entity: EntityRef) -> Option<Compound> {
+        self.native_entity_nbt(entity)
+    }
+    fn entity_merge_nbt(&mut self, entity: EntityRef, nbt: Compound) -> bool {
+        self.native_entity_merge_nbt(entity, nbt)
+    }
+    fn entity_tags(&self, entity: EntityRef) -> Option<Vec<String>> {
+        self.native_entity_tags(entity)
+    }
+    fn entity_add_tag(&mut self, entity: EntityRef, tag: &str) -> bool {
+        self.native_entity_add_tag(entity, tag)
+    }
+    fn entity_remove_tag(&mut self, entity: EntityRef, tag: &str) -> bool {
+        self.native_entity_remove_tag(entity, tag)
+    }
+    fn entity_name(&self, entity: EntityRef) -> Option<String> {
+        self.native_entity_name(entity)
+    }
     fn entity(&self, id: u32) -> Option<EntityRef> {
         self.native_entity(id)
     }
@@ -581,6 +599,23 @@ impl Host for super::Game<'_> {
     }
     fn level_day_time(&self, level: LevelRef) -> Option<i64> {
         self.native_level_day_time(level)
+    }
+    fn living(&self, entity: EntityRef) -> Option<LivingRef> {
+        self.native_living(entity)
+    }
+    fn living_equipment(&self, living: LivingRef, slot: EquipmentSlot) -> Option<ItemStack> {
+        self.native_living_equipment(living, slot)
+    }
+    fn living_hand_item(&self, living: LivingRef, hand: Hand) -> Option<ItemStack> {
+        self.native_living_hand_item(living, hand)
+    }
+    fn living_set_equipment(
+        &mut self,
+        living: LivingRef,
+        slot: EquipmentSlot,
+        stack: Option<ItemStack>,
+    ) -> bool {
+        self.native_living_set_equipment(living, slot, stack)
     }
     fn block_sprites(&self, blocks: &[&str]) -> Vec<Option<BlockSprites>> {
         self.native_block_sprites(blocks)
