@@ -64,6 +64,7 @@ public final class VanillaAutoJumpOracle {
 
     static final class Jumper extends LocalPlayer {
         boolean ground;
+        boolean riding;
         net.minecraft.world.entity.ai.attributes.AttributeMap attributes;
 
         Jumper() {
@@ -71,6 +72,7 @@ public final class VanillaAutoJumpOracle {
         }
 
         @Override public boolean onGround() { return ground; }
+        @Override public boolean isPassenger() { return riding; }
         @Override public net.minecraft.world.entity.ai.attributes.AttributeMap getAttributes() { return attributes; }
         @Override public ItemStack getMainHandItem() { return ItemStack.EMPTY; }
         @Override public ItemStack getItemBySlot(EquipmentSlot slot) { return ItemStack.EMPTY; }
@@ -127,6 +129,7 @@ public final class VanillaAutoJumpOracle {
                 field(Entity.class, "dimensions").set(player, dimensions);
                 player.setBoundingBox(dimensions.makeBoundingBox(position));
                 player.ground = p.get("ground").getAsBoolean();
+                player.riding = p.has("passenger") && p.get("passenger").getAsBoolean();
                 field(Entity.class, "yRot").setFloat(player, f(p.get("yr")));
                 field(Entity.class, "xRot").setFloat(player, f(p.get("xr")));
                 // Player.getSpeed reads the movement speed attribute.

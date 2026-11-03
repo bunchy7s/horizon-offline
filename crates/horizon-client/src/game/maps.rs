@@ -7,7 +7,7 @@
 use super::{Game, lan::LanHost};
 use horizon_client::{
     blocks::{Fluid, MAP_COLORS},
-    hud::{MAP_SLOTS, Rect},
+    hud::{MAP_SLOTS, Rect, map_slot_sprite},
     items::ItemStack,
     mesher::Vertex,
 };
@@ -1682,7 +1682,7 @@ impl Game<'_> {
             .gui
             .atlas
             .sprites
-            .get(&format!("horizon/map{slot}"))
+            .get(map_slot_sprite(slot)?)
             .copied()?;
         let m = self.maps.data.get_mut(&id)?;
         if m.texture_dirty {
@@ -1744,14 +1744,9 @@ impl Game<'_> {
             ],
             out,
         );
-        let decorations = self
-            .maps
-            .data
-            .get(&id)
-            .map(|m| m.decorations.clone())
-            .unwrap_or_default();
+        let decorations = self.maps.data.get(&id).map_or(&[][..], |m| &m.decorations);
         let mut count = 0;
-        for d in &decorations {
+        for d in decorations {
             if show_only_frame && !shown_on_frame(d.sprite) {
                 continue;
             }
